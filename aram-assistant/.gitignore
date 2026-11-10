@@ -1,0 +1,6 @@
+# 运行时产物：不进仓库
+data/cache/
+data/hl_*/
+data/*.log
+data/watcher.stop
+data/*.tmp

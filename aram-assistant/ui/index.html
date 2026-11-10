@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARAM 海克斯大乱斗实时助手</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#151c26; --panel2:#1b2431; --line:#2a3646;
+  --text:#e9f0f8; --muted:#93a3b8; --dim:#6c7c91;
+  --accent:#4cc2ff; --good:#3fd6a4; --warn:#ffc857; --bad:#ff7b7b;
+  --s:#ff6b8a; --a:#ffb454; --b:#7cc6ff; --c:#9aa8bb; --d:#6c7c91;
+  --shadow:0 8px 28px rgba(0,0,0,.45);
+}
+html[data-theme="light"]{
+  --bg:#f2f5f9; --panel:#ffffff; --panel2:#f6f9fc; --line:#dbe3ec;
+  --text:#1b2735; --muted:#5c6c80; --dim:#8493a6;
+  --accent:#1677c8; --good:#128a63; --warn:#b7791f; --bad:#c94646;
+  --s:#d94f6f; --a:#c07c18; --b:#2b7fc4; --c:#6b798c; --d:#8795a6;
+  --shadow:0 8px 24px rgba(30,50,80,.14);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+body.overlay{background:transparent}
+.wrap{max-width:520px;margin:0 auto;padding:12px 12px 40px}
+body.overlay .wrap{max-width:none;padding:8px 8px 24px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);margin-bottom:10px;overflow:hidden}
+body.overlay .card{background:rgba(16,22,31,.90);backdrop-filter:blur(8px)}
+html[data-theme="light"] body.overlay .card{background:rgba(255,255,255,.92)}
+.hd{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+body.overlay .hd{background:transparent}
+.hd h2{font-size:13px;margin:0;font-weight:700;letter-spacing:.3px;flex:1}
+.tag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--dim);margin-right:5px}
+.dot.on{background:var(--good);box-shadow:0 0 8px var(--good)}
+.dot.off{background:var(--bad)}
+.badge{font-size:11px;font-weight:800;border-radius:5px;padding:1px 6px;color:#0b1118;display:inline-block;min-width:18px;text-align:center}
+.badge[data-t="S"]{background:var(--s)} .badge[data-t="A"]{background:var(--a)}
+.badge[data-t="B"]{background:var(--b)} .badge[data-t="C"]{background:var(--c)} .badge[data-t="D"]{background:var(--d)}
+.badge[data-t=""]{background:var(--dim)}
+.row{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--panel2)}
+body.overlay .row:hover{background:rgba(80,110,150,.14)}
+.ic{width:30px;height:30px;border-radius:7px;object-fit:cover;background:var(--panel2);flex:none;border:1px solid var(--line)}
+.ic.sm{width:24px;height:24px;border-radius:5px}
+.nm{flex:1;min-width:0}
+.nm b{display:block;font-size:12.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm small{color:var(--muted);font-size:10.5px}
+.stat{text-align:right;font-size:11px;color:var(--muted);white-space:nowrap;line-height:1.35}
+.stat b{display:block;color:var(--text);font-size:12.5px;font-weight:700}
+.mini{font-size:10.5px;color:var(--dim)}
+.pos{color:var(--good)} .neg{color:var(--bad)} .warn{color:var(--warn)}
+.bar{height:3px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:3px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.body{padding:9px 12px}
+.hint{color:var(--muted);font-size:11.5px;line-height:1.6}
+.empty{padding:16px 12px;text-align:center;color:var(--dim);font-size:12px}
+.banner{padding:7px 12px;font-size:11.5px;border-bottom:1px solid var(--line);background:rgba(255,200,87,.10);color:var(--warn)}
+.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:11.5px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);color:#06131d;border-color:var(--accent);font-weight:700}
+.btn.sm{padding:3px 7px;font-size:10.5px}
+.btn.on{border-color:var(--good);color:var(--good)}
+.btnrow{display:flex;flex-wrap:wrap;gap:6px;padding:9px 12px;border-top:1px solid var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:5px;padding:8px 12px}
+.chip{display:inline-flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:3px 8px;font-size:11px}
+.chip x{cursor:pointer;color:var(--bad);font-weight:700;line-height:1}
+.aug{padding:9px 12px;border-bottom:1px solid var(--line)}
+.aug:last-child{border-bottom:0}
+.aug .top{display:flex;align-items:center;gap:8px}
+.aug .metrics{display:flex;gap:12px;margin:7px 0 5px;flex-wrap:wrap}
+.aug .metric{font-size:10.5px;color:var(--muted)}
+.aug .metric b{display:block;font-size:13px;color:var(--text);font-weight:700}
+.score{display:flex;align-items:center;gap:7px;margin-top:5px}
+.score .track{flex:1;height:5px;background:var(--line);border-radius:4px;overflow:hidden}
+.score .track i{display:block;height:100%;background:linear-gradient(90deg,var(--b),var(--good))}
+.rec{position:absolute;right:12px}
+.step{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line)}
+.step:last-child{border-bottom:0}
+.step .no{width:48px;flex:none;font-size:10.5px;color:var(--accent);font-weight:700;padding-top:5px}
+.step .its{display:flex;flex-wrap:wrap;gap:5px;flex:1}
+.it{display:flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 7px 3px 3px;font-size:11px;white-space:nowrap}
+.it img{width:20px;height:20px;border-radius:4px;object-fit:cover}
+.it small{color:var(--muted);font-size:10px}
+.searchbox{position:relative;padding:9px 12px;border-bottom:1px solid var(--line)}
+.searchbox input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:7px 9px;font-size:12px;outline:none;font-family:inherit}
+.searchbox input:focus{border-color:var(--accent)}
+.results{position:absolute;left:12px;right:12px;top:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;z-index:20;max-height:220px;overflow:auto;box-shadow:var(--shadow)}
+.results div{display:flex;align-items:center;gap:7px;padding:6px 9px;cursor:pointer;font-size:11.5px}
+.results div:hover{background:var(--panel2)}
+.results img{width:22px;height:22px;border-radius:5px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+.fld{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.fld input[type=number]{width:58px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:5px;padding:3px 5px;font-size:11px;font-family:inherit}
+.fld input[type=range]{flex:1;accent-color:var(--accent)}
+.seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{flex:1;background:var(--panel2);border:0;color:var(--muted);padding:5px;font-size:11px;cursor:pointer;font-family:inherit}
+.seg button.on{background:var(--accent);color:#06131d;font-weight:700}
+details summary{cursor:pointer;padding:9px 12px;font-size:12px;font-weight:650;color:var(--muted);list-style:none;border-top:1px solid var(--line)}
+details summary::-webkit-details-marker{display:none}
+details summary:before{content:"▸ ";color:var(--accent)}
+details[open] summary:before{content:"▾ "}
+.log{font:10.5px/1.6 ui-monospace,Consolas,monospace;color:var(--dim);padding:8px 12px;max-height:120px;overflow:auto;white-space:pre-wrap}
+.foot{text-align:center;color:var(--dim);font-size:10.5px;padding:8px 0 20px;line-height:1.7}
+.kv{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);padding:3px 0}
+.kv b{color:var(--text);font-weight:600}
+.topbar{display:flex;align-items:center;gap:7px;margin-bottom:10px;padding:8px 11px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+body.overlay .topbar{background:rgba(16,22,31,.9)}
+.topbar .t{font-size:13px;font-weight:800;letter-spacing:.3px;flex:1}
+.topbar .v{font-size:10.5px;color:var(--dim)}
+.hide{display:none!important}
+/* 游戏内浮窗：紧凑形态，只保留三大信息块 */
+body.compact .console-only{display:none!important}
+body:not(.compact) .overlay-only{display:none!important}
+body.compact .wrap{padding:6px 6px 14px}
+body.compact .topbar{padding:6px 9px;margin-bottom:7px}
+body.compact .card{margin-bottom:7px;border-radius:9px}
+body.compact .hd{padding:6px 9px}
+body.compact .row{padding:5px 9px}
+body.compact .body{padding:7px 9px}
+body.compact .aug{padding:7px 9px}
+body.compact .step{padding:5px 0}
+body.compact .btnrow{padding:7px 9px;gap:4px}
+body.compact .row{gap:5px;padding:5px 7px}
+body.compact .ic{width:24px;height:24px}
+body.compact .ic.sm{width:19px;height:19px}
+body.compact .nm b{font-size:11.5px}
+body.compact .nm small{font-size:9.5px}
+body.compact .stat{font-size:10px}
+body.compact .stat b{font-size:11.5px}
+body.compact .stat-pick{display:none}
+body.compact .badge{font-size:10px;padding:1px 4px;min-width:15px}
+body.compact .btn.sm{padding:2px 5px;font-size:10px}
+body.compact .aug .metrics{gap:8px;margin:5px 0 4px}
+body.compact .aug .metric{font-size:10px}
+body.compact .aug .metric b{font-size:11.5px}
+body.compact .metric-sample{display:none}
+body.compact .step .no{width:38px;font-size:10px}
+body.compact .it{font-size:10px;padding:2px 5px 2px 2px}
+body.compact .it img{width:17px;height:17px}
+body.compact .hd h2{font-size:12px}
+.inline-wr{font-size:11.5px;font-weight:700;margin-left:3px}
+body.compact .aug .top .badge{flex:none}
+/* 折叠态：只留一条小胶囊 */
+body.compact.collapsed .full-only{display:none!important}
+.mini-bar,.mini-bar{display:none}
+body.compact.collapsed .mini-bar{display:flex!important}
+body.compact.collapsed .wrap{padding:0;max-width:none}
+.mini-bar{align-items:center;gap:7px;padding:6px 8px;background:rgba(16,22,31,.94);border:1px solid var(--line);border-radius:11px;font-size:11.5px;color:var(--text);box-shadow:var(--shadow)}
+html[data-theme="light"] .mini-bar{background:rgba(255,255,255,.95)}
+.mini-bar .mt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-bar .btn{flex:none;display:inline-block!important;padding:2px 7px;font-size:10.5px}
+/* 新增：海克斯说明 / 协同 / 下一件 / 敌方阵容 / 分件替换 */
+.desc{font-size:11px;color:var(--muted);line-height:1.55;margin-top:5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.syn{margin-top:5px;font-size:11px;color:var(--good);line-height:1.5}
+.pick{font-size:9.5px;font-weight:800;color:#06131d;background:var(--good);border-radius:5px;padding:1px 5px;vertical-align:1px}
+.dimmed{opacity:.45}
+.next{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);background:rgba(76,194,255,.09)}
+.next .ni{width:34px;height:34px;border-radius:7px;object-fit:cover;background:var(--panel2);border:1px solid var(--line);flex:none}
+.next .nt{flex:1;min-width:0}
+.next .nt b{font-size:13px;display:block}
+.next .nt small{color:var(--muted);font-size:10.5px}
+.next .np{font-size:10.5px;color:var(--accent);font-weight:700;white-space:nowrap}
+.enemy{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line)}
+.enemy .lb{font-size:10.5px;color:var(--dim);margin-right:1px}
+.enemy .chip{font-size:10.5px;padding:2px 7px}
+.tag-mini{font-size:9.5px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:3px;white-space:nowrap}
+.tag-mini.hot{color:var(--good);border-color:var(--good)}
+.advice{padding:6px 12px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line);line-height:1.6}
+.advice b{color:var(--text)}
+.adv-1{padding:6px 12px;font-size:11px;border-bottom:1px dashed var(--line);color:var(--muted)}
+.adv-1:last-child{border-bottom:0}
+.adv-1 b{color:var(--text)}
+.own{color:var(--good);font-size:10px;margin-left:3px}
+body.compact .desc{-webkit-line-clamp:2;font-size:10.5px}
+body.compact .next{padding:6px 9px}
+body.compact .next .ni{width:28px;height:28px}
+body.compact .enemy{padding:5px 9px;gap:4px}
+body.compact .enemy .chip{font-size:9.5px;padding:1px 5px}
+body.compact .advice{padding:5px 9px;font-size:10px}
+body.compact .syn{font-size:10px;margin-top:4px}
+body.compact .basis-line{display:none}
+body.compact .aug-act{padding:4px 0 0;border:0}
+body.compact .aug-act .btn{width:100%;padding:3px}
+body.compact #selectedChips{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="mini-bar">
+    <span class="dot" id="miniDot"></span>
+    <span class="mt" id="miniText">ARAM 助手 · 加载中</span>
+    <button class="btn sm" id="btnExpand">展开</button>
+  </div>
+
+  <div class="topbar full-only">
+    <div>
+      <div class="t">ARAM 实时助手</div>
+      <div class="v"><span class="dot" id="statusDot"></span><span id="statusText">连接中...</span></div>
+    </div>
+    <button class="btn sm overlay-only" id="btnCollapse">收起</button>
+    <button class="btn sm overlay-only" id="btnFull">完整版</button>
+    <button class="btn sm" id="btnTheme" title="切换明暗">明暗</button>
+    <button class="btn sm" id="btnRefresh" title="重新同步数据">刷新</button>
+  </div>
+
+  <div id="demoBanner" class="banner hide full-only">演示模式：未连接本地服务。运行 start.bat 后会自动切换为真实对局数据。</div>
+  <div id="errBanner" class="banner hide full-only"></div>
+
+  <!-- 连接自检 -->
+  <section class="card console-only full-only">
+    <div class="hd">
+      <h2>连接自检 · 我到底开了没有</h2>
+      <button class="btn sm" id="btnDiagRefresh">重新检测</button>
+    </div>
+    <div id="diagList" class="body"><div class="hint">正在检查...</div></div>
+    <div id="diagHint" class="body hint" style="border-top:1px solid var(--line)"></div>
+    <div class="body hint" style="border-top:1px solid var(--line)">
+      客户端大厅 / 主页面按设计<b>不会</b>弹浮窗，只有进入英雄选择或对局才自动出现。想立刻验证就点「立即弹出浮窗」——它会强行置顶显示，跟游戏阶段无关。
+    </div>
+    <div class="btnrow">
+      <button class="btn sm pri" id="btnTestOverlay">立即弹出浮窗</button>
+      <button class="btn sm" id="btnRedetect">重连客户端</button>
+      <button class="btn sm" id="btnOpenConsole">打开控制台</button>
+    </div>
+  </section>
+
+  <!-- 英雄选择 -->
+  <section class="card full-only">
+    <div class="hd">
+      <h2>1 · 英雄选择</h2>
+      <span class="tag" id="phaseTag">等待客户端</span>
+    </div>
+    <div id="champNow"></div>
+    <div id="benchList"></div>
+    <div id="benchHint" class="empty">进入大乱斗英雄选择后，这里会列出共享备选席里每个英雄的排名、梯队、胜率与选取率。</div>
+    <div class="btnrow">
+      <button class="btn sm" id="btnManualChampion">手动指定英雄</button>
+      <button class="btn sm" id="btnClearManual">恢复自动识别</button>
+    </div>
+  </section>
+
+  <!-- 海克斯 -->
+  <section class="card full-only">
+    <div class="hd">
+      <h2>2 · 海克斯三选一</h2>
+      <span class="tag" id="stageTag">第 1 次</span>
+      <span class="tag" id="ocrTag">OCR 待命</span>
+    </div>
+    <div id="augCards"></div>
+    <div id="augHint" class="empty">海克斯卡牌出现时，会自动识别屏幕并显示胜率、选取率与评级。</div>
+    <div class="chips" id="selectedChips"></div>
+    <div class="btnrow">
+      <button class="btn sm" id="btnOcrNow">立即识别一次</button>
+      <button class="btn sm" id="btnAddAugment">手动添加海克斯</button>
+      <button class="btn sm" id="btnClearAug">清空已选</button>
+    </div>
+    <details id="ocrDebug">
+      <summary>OCR 识别原文 / 状态</summary>
+      <div class="log" id="ocrLog">暂无</div>
+    </details>
+  </section>
+
+  <!-- 出装 -->
+  <section class="card full-only">
+    <div class="hd">
+      <h2>3 · 出装与顺序</h2>
+      <span class="tag" id="buildTag">待计算</span>
+    </div>
+    <div id="nextBox"></div>
+    <div id="enemyBox" class="enemy hide"></div>
+    <div id="buildHead" class="body"></div>
+    <div id="buildSteps" class="body"></div>
+    <div id="slotAdvice" class="body"></div>
+    <div id="counterBox" class="body"></div>
+    <div id="buildNotes" class="body hint"></div>
+    <div class="btnrow">
+      <button class="btn sm pri" id="btnItemset">写入游戏内配装方案</button>
+      <button class="btn sm" id="btnSlot">查看分件备选</button>
+    </div>
+    <div id="slotBox" class="body hide"></div>
+  </section>
+
+  <!-- 设置 -->
+  <section class="card console-only full-only">
+    <div class="hd"><h2>数据与浮窗设置</h2><span class="tag" id="dataTag"></span></div>
+    <div class="body hint" style="border-bottom:1px solid var(--line)">
+      <b>快速上手</b><br>
+      1 · 已绑定开机自启：打开 League 客户端后助手会被自动拉起，无需手动运行。<br>
+      2 · 进入英雄选择或对局时自动弹出置顶浮窗；下面也可手动开关。<br>
+      3 · 海克斯卡牌出现时会自动识别；识别不准可微调识别区域，或直接手动添加。<br>
+      4 · 卡牌会显示「本英雄搭配胜率、第 N 次阶段胜率、与已选海克斯的组合胜率」，并按综合分排序标记首选。<br>
+      5 · 选定海克斯后第 3 块会切换为该海克斯的专属出装顺序，可一键写入游戏内配装方案。<br>
+      6 · 对局中会读取你已买的装备，标出「下一件」与计划外出装；敌方阵容也会参与装备排序。
+    </div>
+    <div class="body">
+      <div class="kv"><span>数据集（对应站点 dataset 参数）</span><span class="seg" style="width:150px"><button data-ds="high">高分段</button><button data-ds="all">全分段</button></span></div>
+      <div class="kv"><span>海克斯阶段（自动=已选数量+1）</span><span class="seg" style="width:212px"><button data-stage="0">自动</button><button data-stage="1">1</button><button data-stage="2">2</button><button data-stage="3">3</button><button data-stage="4">4</button></span></div>
+      <div class="kv"><span>自动识别海克斯</span><button class="btn sm" id="btnOcrToggle"></button></div>
+      <div class="kv"><span>随客户端自动弹出浮窗</span><button class="btn sm" id="btnAutoOverlay"></button></div>
+      <div class="kv"><span>透明浮窗</span><button class="btn sm" id="btnOverlay"></button></div>
+      <div class="kv"><span>浮窗位置（避开中央卡牌）</span><span class="seg" style="width:150px"><button data-pos="left">左</button><button data-pos="center">中</button><button data-pos="right">右</button></span></div>
+      <div class="kv"><span>浮窗透明度</span><input type="range" id="opacity" min="30" max="100" step="1" style="width:130px;accent-color:var(--accent)"></div>
+      <div class="kv"><span>鼠标穿透（游戏可正常点击）</span><button class="btn sm" id="btnClick"></button></div>
+      <div class="grid2" style="margin-top:8px">
+        <label class="fld">X <input type="number" id="rx" min="0" max="0.9" step="0.02"></label>
+        <label class="fld">Y <input type="number" id="ry" min="0" max="0.9" step="0.02"></label>
+        <label class="fld">宽 <input type="number" id="rw" min="0.1" max="1" step="0.02"></label>
+        <label class="fld">高 <input type="number" id="rh" min="0.1" max="1" step="0.02"></label>
+      </div>
+      <div class="hint" style="margin-top:6px">识别区域为屏幕比例。默认框住屏幕中央的海克斯卡牌，若识别不准请微调后点「立即识别」验证。</div>
+    </div>
+    <div class="searchbox hide" id="searchBox">
+      <input id="searchInput" autocomplete="off" placeholder="输入英雄名 / 海克斯名，回车或点击结果">
+      <div class="results hide" id="searchResults"></div>
+    </div>
+    <details>
+      <summary>运行日志与说明</summary>
+      <div class="log" id="logBox"></div>
+      <div class="body hint" style="border-top:1px solid var(--line)">
+        数据来源：ARAMKit 公开统计 JSON（data.aramkit.cn），与网页同源、每日更新。本工具仅读取 Riot 官方本地接口与自身屏幕，不读取游戏内存、不注入进程、不修改游戏文件、不自动化操作；出装写入为可选功能，需你手动点击。
+      </div>
+    </details>
+  </section>
+  <div class="foot console-only full-only">ARAM 实时助手 · 仅供个人辅助参考<br>胜率是统计描述，不保证单局结果</div>
+</div>
+
+<script>
+const DEMO_STATE = {"ok":true,"ready":true,"error":"","serverTime":"--:--:--","version":"16.22","dataDate":"2026-11-09","sampleSize":4297659,"dataset":"high","phase":"InProgress","clientConnected":true,"clientError":"","gameTime":620,"championId":"236","championName":"卢锡安","myChampionId":"236","champion":{"id":"236","name":"卢锡安","title":"圣枪游侠","slug":"lucian","riotId":"Lucian","icon":"https://data.aramkit.cn/assets/champion/236-d2c396fe20f4.webp","roles":["Marksman","Assassin"],"tier":"A","rank":27,"winRate":0.5277,"pickRate":0.1411,"sampleCount":606303},"bench":[{"id":"157","name":"亚索","title":"疾风剑豪","slug":"yasuo","riotId":"Yasuo","icon":"https://data.aramkit.cn/assets/champion/157-617df344cd83.webp","roles":["Fighter","Assassin"],"tier":"S","rank":1,"winRate":0.6048,"pickRate":0.127,"sampleCount":545846},{"id":"4","name":"崔斯特","title":"卡牌大师","slug":"twistedfate","riotId":"TwistedFate","icon":"https://data.aramkit.cn/assets/champion/4-6f3d7d0f980b.webp","roles":["Mage","Marksman"],"tier":"S","rank":2,"winRate":0.5792,"pickRate":0.1217,"sampleCount":523175},{"id":"114","name":"菲奥娜","title":"无双剑姬","slug":"fiora","riotId":"Fiora","icon":"https://data.aramkit.cn/assets/champion/114-f7e51288180c.webp","roles":["Fighter","Assassin"],"tier":"S","rank":3,"winRate":0.5689,"pickRate":0.074,"sampleCount":318024},{"id":"777","name":"永恩","title":"封魔剑魂","slug":"yone","riotId":"Yone","icon":"https://data.aramkit.cn/assets/champion/777-6d1f24b44ca1.webp","roles":["Fighter","Assassin"],"tier":"S","rank":4,"winRate":0.5617,"pickRate":0.1079,"sampleCount":463818},{"id":"887","name":"格温","title":"灵罗娃娃","slug":"gwen","riotId":"Gwen","icon":"https://data.aramkit.cn/assets/champion/887-52f020b016e8.webp","roles":["Fighter"],"tier":"S","rank":5,"winRate":0.5587,"pickRate":0.0443,"sampleCount":190435}],"candidates":[{"id":"1048","name":"珠光护手","aliases":["Jeweled Gauntlet","jeweled-gauntlet"],"slug":"jeweled-gauntlet","icon":"https://data.aramkit.cn/assets/augment/1048-da59c87ce7e9.webp","rarity":"prismatic","tier":"B","rank":143,"winRate":0.4859,"pickRate":0.0643,"sampleCount":1743949,"availableStages":[1,2,3,4],"rarityLabel":"棱彩","stages":[1,2,3,4],"globalWinRate":48.6,"globalPickRate":6.4,"globalTier":"B","description":"你的技能可产生暴击以造成45%额外伤害。 获得(25%+4.5%)暴击几率。 已对英雄造成的伤害：当前对局数值","stageTier":"B","stageWinRate":48.6,"stageRank":145,"stage":2,"stageOk":true,"comboWinRate":58.7,"comboPickRate":14.2,"comboSample":54783,"delta":5.9,"comboTier":"S","basis":"本英雄 + 该海克斯的实际组合胜率","synergyWinRate":67.0,"synergyDelta":14.3,"synergySample":11046,"synergyPartner":"珠光手镯","synergyPartnerId":"3123","score":100,"grade":"S","scoreBase":94.7,"scoreStage":-6,"scoreSynergy":12},{"id":"3018","name":"大腕","aliases":["Big Shot","big-shot"],"slug":"big-shot","icon":"https://data.aramkit.cn/assets/augment/3018-795f60c15f28.webp","rarity":"prismatic","tier":"C","rank":167,"winRate":0.4801,"pickRate":0.0237,"sampleCount":641987,"availableStages":[1,2,3,4],"rarityLabel":"棱彩","stages":[1,2,3,4],"globalWinRate":48.0,"globalPickRate":2.4,"globalTier":"C","description":"获得35%暴击伤害和25%额外攻击力。 你的75%攻击速度转化为暴击伤害。 (每1%攻击速度转为0.7%暴击伤害) 当前暴击伤害：当前对局数值%","stageTier":"C","stageWinRate":48.1,"stageRank":167,"stage":2,"stageOk":true,"comboWinRate":56.9,"comboPickRate":14.0,"comboSample":53640,"delta":4.1,"comboTier":"S","basis":"本英雄 + 该海克斯的实际组合胜率","synergyWinRate":65.9,"synergyDelta":13.2,"synergySample":12505,"synergyPartner":"珠光手镯","synergyPartnerId":"3123","score":93.3,"grade":"S","scoreBase":87.3,"scoreStage":-6,"scoreSynergy":12},{"id":"1092","name":"易损","aliases":["Vulnerability","vulnerability"],"slug":"vulnerability","icon":"https://data.aramkit.cn/assets/augment/1092-0b8b62f849df.webp","rarity":"gold","tier":"B","rank":109,"winRate":0.4943,"pickRate":0.0278,"sampleCount":753153,"availableStages":[1,2,3,4],"rarityLabel":"黄金","stages":[1,2,3,4],"globalWinRate":49.4,"globalPickRate":2.8,"globalTier":"B","description":"你的装备效果和持续伤害效果可以暴击来造成145%额外伤害。 获得25%暴击几率。 已造成的伤害：当前对局数值","stageTier":"B","stageWinRate":49.5,"stageRank":117,"stage":2,"stageOk":true,"comboWinRate":58.2,"comboPickRate":25.8,"comboSample":99179,"delta":5.5,"comboTier":"S","basis":"本英雄 + 该海克斯的实际组合胜率","synergyWinRate":64.0,"synergyDelta":11.2,"synergySample":22350,"synergyPartner":"珠光手镯","synergyPartnerId":"3123","score":98.9,"grade":"S","scoreBase":92.9,"scoreStage":-6,"scoreSynergy":12}],"selectedAugments":[{"id":"3123","name":"珠光手镯","aliases":["Jeweled Bracelet","jeweled-bracelet"],"slug":"jeweled-bracelet","icon":"https://data.aramkit.cn/assets/augment/1103-1a5a4c6f853b.webp","rarity":"gold","tier":"B","rank":102,"winRate":0.496,"pickRate":0.0305,"sampleCount":826532,"availableStages":[1,2,3,4],"rarityLabel":"黄金","stages":[1,2,3,4],"globalWinRate":49.6,"globalPickRate":3.0,"globalTier":"B","description":"【所选技能】可产生暴击以造成45%额外伤害。 获得25%暴击几率。 已对英雄造成的伤害：当前对局数值","comboWinRate":58.4,"comboPickRate":26.1,"comboSample":100237,"delta":5.6,"comboTier":"S","basis":"本英雄 + 该海克斯的实际组合胜率","score":93.4,"grade":"S","scoreBase":93.4,"scoreStage":0.0,"scoreSynergy":0.0}],"build":{"archetype":"暴击","archetypeKey":"crit","source":"按已选海克斯「珠光手镯」的专属样本","fromAugment":"珠光手镯","sampleCount":25324,"winRate":62.9,"pickRate":34.1,"augmentsUsed":["珠光手镯"],"steps":[{"slot":"出门装","items":[{"id":"1036","name":"长剑","icon":"https://data.aramkit.cn/assets/item/1036-6eabea8be9b9.webp","price":350,"cats":["Damage","Lane"],"tags":["攻击"],"final":false,"acq":"shop"},{"id":"1037","name":"十字镐","icon":"https://data.aramkit.cn/assets/item/1037-54297e56d10e.webp","price":875,"cats":["Damage"],"tags":["攻击"],"final":false,"acq":"shop"}],"winRate":64.0,"pickRate":40.6,"sampleCount":5247},{"slot":"鞋子","items":[{"id":"0","name":"不买鞋子","icon":"https://data.aramkit.cn/assets/item/no-boots-03c39c232a5a.webp","price":0,"cats":[],"tags":[],"final":false,"acq":"synthetic","winRate":64.3,"pickRate":41.5,"sampleCount":5363}],"winRate":64.3,"pickRate":41.5,"sampleCount":5363,"why":[]},{"slot":"第 1 件","items":[{"id":"6676","name":"收集者","icon":"https://data.aramkit.cn/assets/item/6676-08cb1586917a.webp","price":3000,"cats":["Damage","CriticalStrike","ArmorPenetration"],"tags":["攻击","暴击","穿甲"],"final":true,"acq":"shop"}],"winRate":59.4,"pickRate":72.6,"sampleCount":63659,"why":[]},{"slot":"第 2 件","items":[{"id":"3031","name":"无尽之刃","icon":"https://data.aramkit.cn/assets/item/3031-1dd45a28b705.webp","price":3500,"cats":["CriticalStrike","Damage"],"tags":["暴击","攻击"],"final":true,"acq":"shop"}],"winRate":59.8,"pickRate":41.2,"sampleCount":36102,"why":[]},{"slot":"第 3 件","items":[{"id":"6696","name":"公理圆弧","icon":"https://data.aramkit.cn/assets/item/6696-d42a243c4f5e.webp","price":2750,"cats":["Damage","ArmorPenetration","AbilityHaste"],"tags":["攻击","穿甲","急速"],"final":true,"acq":"shop"}],"winRate":61.3,"pickRate":20.0,"sampleCount":17002,"why":[]},{"slot":"后续 1","items":[{"id":"3046","name":"幻影之舞","icon":"https://data.aramkit.cn/assets/item/3046-f2ae91b9527d.webp","price":2650,"cats":["CriticalStrike","AttackSpeed","NonbootsMovement"],"tags":["暴击","攻速"],"final":true,"acq":"shop"}],"winRate":74.0,"pickRate":1.5,"sampleCount":196,"why":[]},{"slot":"后续 2","items":[{"id":"6694","name":"赛瑞尔达的怨恨","icon":"https://data.aramkit.cn/assets/item/6694-c5e913224830.webp","price":3000,"cats":["Damage","CooldownReduction","ArmorPenetration","AbilityHaste"],"tags":["攻击","急速","穿甲"],"final":true,"acq":"shop"}],"winRate":67.1,"pickRate":7.0,"sampleCount":906,"why":[]},{"slot":"后续 3","items":[{"id":"3142","name":"幽梦之灵","icon":"https://data.aramkit.cn/assets/item/3142-44a46adb2f7e.webp","price":2800,"cats":["Damage","Active","NonbootsMovement","ArmorPenetration"],"tags":["攻击","主动","穿甲"],"final":true,"acq":"shop"}],"winRate":68.8,"pickRate":3.2,"sampleCount":416,"why":[]}],"order":[{"id":"1036","name":"长剑","icon":"https://data.aramkit.cn/assets/item/1036-6eabea8be9b9.webp","price":350,"slot":"出门装","owned":true},{"id":"1037","name":"十字镐","icon":"https://data.aramkit.cn/assets/item/1037-54297e56d10e.webp","price":875,"slot":"出门装","owned":false},{"id":"6676","name":"收集者","icon":"https://data.aramkit.cn/assets/item/6676-08cb1586917a.webp","price":3000,"slot":"第 1 件","owned":true},{"id":"3031","name":"无尽之刃","icon":"https://data.aramkit.cn/assets/item/3031-1dd45a28b705.webp","price":3500,"slot":"第 2 件","owned":false},{"id":"6696","name":"公理圆弧","icon":"https://data.aramkit.cn/assets/item/6696-d42a243c4f5e.webp","price":2750,"slot":"第 3 件","owned":false},{"id":"3046","name":"幻影之舞","icon":"https://data.aramkit.cn/assets/item/3046-f2ae91b9527d.webp","price":2650,"slot":"后续 1","owned":false},{"id":"6694","name":"赛瑞尔达的怨恨","icon":"https://data.aramkit.cn/assets/item/6694-c5e913224830.webp","price":3000,"slot":"后续 2","owned":false},{"id":"3142","name":"幽梦之灵","icon":"https://data.aramkit.cn/assets/item/3142-44a46adb2f7e.webp","price":2800,"slot":"后续 3","owned":false}],"slotRanking":{"1":[{"id":"6695","name":"巨蛇之牙","icon":"https://data.aramkit.cn/assets/item/6695-5012c30513e3.webp","price":2500,"cats":["Damage","ArmorPenetration"],"tags":["攻击","穿甲"],"final":true,"acq":"shop","winRate":61.6,"pickRate":2.1,"sampleCount":1884,"enemyBonus":0.0,"why":[]},{"id":"6676","name":"收集者","icon":"https://data.aramkit.cn/assets/item/6676-08cb1586917a.webp","price":3000,"cats":["Damage","CriticalStrike","ArmorPenetration"],"tags":["攻击","暴击","穿甲"],"final":true,"acq":"shop","winRate":59.4,"pickRate":72.6,"sampleCount":63659,"enemyBonus":0.0,"why":[]},{"id":"6696","name":"公理圆弧","icon":"https://data.aramkit.cn/assets/item/6696-d42a243c4f5e.webp","price":2750,"cats":["Damage","ArmorPenetration","AbilityHaste"],"tags":["攻击","穿甲","急速"],"final":true,"acq":"shop","winRate":59.2,"pickRate":3.5,"sampleCount":3085,"enemyBonus":0.0,"why":[]},{"id":"3036","name":"多米尼克领主的致意","icon":"https://data.aramkit.cn/assets/item/3036-247cb1b39834.webp","price":3300,"cats":["Damage","CriticalStrike","ArmorPenetration"],"tags":["攻击","暴击","穿甲"],"final":true,"acq":"shop","winRate":58.5,"pickRate":1.4,"sampleCount":1218,"enemyBonus":0.0,"why":[]}],"2":[{"id":"6696","name":"公理圆弧","icon":"https://data.aramkit.cn/assets/item/6696-d42a243c4f5e.webp","price":2750,"cats":["Damage","ArmorPenetration","AbilityHaste"],"tags":["攻击","穿甲","急速"],"final":true,"acq":"shop","winRate":61.1,"pickRate":19.8,"sampleCount":17365,"enemyBonus":0.0,"why":[]},{"id":"6333","name":"死亡之舞","icon":"https://data.aramkit.cn/assets/item/6333-2647b492690e.webp","price":3300,"cats":["Armor","Damage","AbilityHaste"],"tags":["护甲","攻击","急速"],"final":true,"acq":"shop","winRate":63.0,"pickRate":0.1,"sampleCount":92,"enemyBonus":4.0,"why":["扛 4 物理"]},{"id":"3031","name":"无尽之刃","icon":"https://data.aramkit.cn/assets/item/3031-1dd45a28b705.webp","price":3500,"cats":["CriticalStrike","Damage"],"tags":["暴击","攻击"],"final":true,"acq":"shop","winRate":59.8,"pickRate":41.2,"sampleCount":36102,"enemyBonus":0.0,"why":[]},{"id":"3008","name":"暴食胫甲","icon":"https://data.aramkit.cn/assets/item/3008-7ac06b7b0793.webp","price":1100,"cats":["LifeSteal","SpellVamp","Boots"],"tags":["吸血","鞋子"],"final":true,"acq":"shop","winRate":58.3,"pickRate":3.8,"sampleCount":3337,"enemyBonus":0.0,"why":[]}],"3":[{"id":"6696","name":"公理圆弧","icon":"https://data.aramkit.cn/assets/item/6696-d42a243c4f5e.webp","price":2750,"cats":["Damage","ArmorPenetration","AbilityHaste"],"tags":["攻击","穿甲","急速"],"final":true,"acq":"shop","winRate":61.3,"pickRate":20.0,"sampleCount":17002,"enemyBonus":0.0,"why":[]},{"id":"3009","name":"轻灵之靴","icon":"https://data.aramkit.cn/assets/item/3009-bce237321d45.webp","price":1000,"cats":["Boots"],"tags":["鞋子"],"final":true,"acq":"shop","winRate":66.7,"pickRate":0.1,"sampleCount":63,"enemyBonus":0.0,"why":[]},{"id":"3008","name":"暴食胫甲","icon":"https://data.aramkit.cn/assets/item/3008-7ac06b7b0793.webp","price":1100,"cats":["LifeSteal","SpellVamp","Boots"],"tags":["吸血","鞋子"],"final":true,"acq":"shop","winRate":59.1,"pickRate":6.7,"sampleCount":5697,"enemyBonus":0.0,"why":[]},{"id":"3031","name":"无尽之刃","icon":"https://data.aramkit.cn/assets/item/3031-1dd45a28b705.webp","price":3500,"cats":["CriticalStrike","Damage"],"tags":["暴击","攻击"],"final":true,"acq":"shop","winRate":59.0,"pickRate":30.5,"sampleCount":26010,"enemyBonus":0.0,"why":[]}],"4":[{"id":"994403","name":"金铲铲","icon":"https://data.aramkit.cn/assets/item/994403-0cf576782d54.webp","price":2500,"cats":["Health","SpellBlock","HealthRegen","Armor","Damage","CriticalStrike","AttackSpeed","LifeSteal","SpellDamage","Mana","ManaRegen","CooldownReduction","NonbootsMovement"],"tags":["生命","魔抗","回血","护甲","攻击","暴击","攻速","吸血","法强","法力","回蓝","急速"],"final":true,"acq":"conditional","winRate":68.8,"pickRate":0.1,"sampleCount":79,"enemyBonus":5.5,"why":["扛 4 物理","撑血量"]},{"id":"2517","name":"无穷饥渴","icon":"https://data.aramkit.cn/assets/item/2517-6c9db9bae883.webp","price":3100,"cats":["Damage","LifeSteal","SpellVamp","Tenacity","AbilityHaste"],"tags":["攻击","吸血","韧性","急速"],"final":true,"acq":"shop","winRate":61.9,"pickRate":1.6,"sampleCount":1235,"enemyBonus":0.0,"why":[]},{"id":"6694","name":"赛瑞尔达的怨恨","icon":"https://data.aramkit.cn/assets/item/6694-c5e913224830.webp","price":3000,"cats":["Damage","CooldownReduction","ArmorPenetration","AbilityHaste"],"tags":["攻击","急速","穿甲"],"final":true,"acq":"shop","winRate":61.4,"pickRate":1.3,"sampleCount":1013,"enemyBonus":0.0,"why":[]},{"id":"3158","name":"明朗之靴","icon":"https://data.aramkit.cn/assets/item/3158-f42e32f01a4f.webp","price":900,"cats":["Boots","CooldownReduction"],"tags":["鞋子","急速"],"final":true,"acq":"shop","winRate":61.1,"pickRate":1.5,"sampleCount":1138,"enemyBonus":0.0,"why":[]}],"5":[{"id":"6699","name":"电震涡流剑","icon":"https://data.aramkit.cn/assets/item/6699-0c9c741f30a3.webp","price":3000,"cats":["Damage","Active","CooldownReduction","ArmorPenetration","AbilityHaste"],"tags":["攻击","主动","急速","穿甲"],"final":true,"acq":"shop","winRate":66.0,"pickRate":1.5,"sampleCount":937,"enemyBonus":0.0,"why":[]},{"id":"3814","name":"夜之锋刃","icon":"https://data.aramkit.cn/assets/item/3814-014734a6fec5.webp","price":3000,"cats":["Health","Damage","ArmorPenetration"],"tags":["生命","攻击","穿甲"],"final":true,"acq":"shop","winRate":63.3,"pickRate":3.3,"sampleCount":2058,"enemyBonus":1.5,"why":["撑血量"]},{"id":"6694","name":"赛瑞尔达的怨恨","icon":"https://data.aramkit.cn/assets/item/6694-c5e913224830.webp","price":3000,"cats":["Damage","CooldownReduction","ArmorPenetration","AbilityHaste"],"tags":["攻击","急速","穿甲"],"final":true,"acq":"shop","winRate":64.5,"pickRate":1.7,"sampleCount":1066,"enemyBonus":0.0,"why":[]},{"id":"3142","name":"幽梦之灵","icon":"https://data.aramkit.cn/assets/item/3142-44a46adb2f7e.webp","price":2800,"cats":["Damage","Active","NonbootsMovement","ArmorPenetration"],"tags":["攻击","主动","穿甲"],"final":true,"acq":"shop","winRate":69.4,"pickRate":1.0,"sampleCount":638,"enemyBonus":0.0,"why":[]}],"6":[{"id":"994403","name":"金铲铲","icon":"https://data.aramkit.cn/assets/item/994403-0cf576782d54.webp","price":2500,"cats":["Health","SpellBlock","HealthRegen","Armor","Damage","CriticalStrike","AttackSpeed","LifeSteal","SpellDamage","Mana","ManaRegen","CooldownReduction","NonbootsMovement"],"tags":["生命","魔抗","回血","护甲","攻击","暴击","攻速","吸血","法强","法力","回蓝","急速"],"final":true,"acq":"conditional","winRate":64.1,"pickRate":2.1,"sampleCount":836,"enemyBonus":5.5,"why":["扛 4 物理","撑血量"]},{"id":"6699","name":"电震涡流剑","icon":"https://data.aramkit.cn/assets/item/6699-0c9c741f30a3.webp","price":3000,"cats":["Damage","Active","CooldownReduction","ArmorPenetration","AbilityHaste"],"tags":["攻击","主动","急速","穿甲"],"final":true,"acq":"shop","winRate":67.1,"pickRate":2.2,"sampleCount":873,"enemyBonus":0.0,"why":[]},{"id":"6333","name":"死亡之舞","icon":"https://data.aramkit.cn/assets/item/6333-2647b492690e.webp","price":3300,"cats":["Armor","Damage","AbilityHaste"],"tags":["护甲","攻击","急速"],"final":true,"acq":"shop","winRate":61.2,"pickRate":2.1,"sampleCount":835,"enemyBonus":4.0,"why":["扛 4 物理"]},{"id":"3142","name":"幽梦之灵","icon":"https://data.aramkit.cn/assets/item/3142-44a46adb2f7e.webp","price":2800,"cats":["Damage","Active","NonbootsMovement","ArmorPenetration"],"tags":["攻击","主动","穿甲"],"final":true,"acq":"shop","winRate":64.8,"pickRate":2.2,"sampleCount":876,"enemyBonus":0.0,"why":[]}]},"slotAdvice":[{"slot":"第 1 件","current":{"id":"6676","name":"收集者","icon":"https://data.aramkit.cn/assets/item/6676-08cb1586917a.webp","price":3000,"cats":["Damage","CriticalStrike","ArmorPenetration"],"tags":["攻击","暴击","穿甲"],"final":true,"acq":"shop"},"best":{"id":"6695","name":"巨蛇之牙","icon":"https://data.aramkit.cn/assets/item/6695-5012c30513e3.webp","price":2500,"cats":["Damage","ArmorPenetration"],"tags":["攻击","穿甲"],"final":true,"acq":"shop","winRate":61.6,"pickRate":2.1,"sampleCount":1884,"enemyBonus":0.0,"why":[]},"gain":2.2,"why":[]}],"counters":[{"id":"3143","name":"兰顿之兆","icon":"https://data.aramkit.cn/assets/item/3143-358c2fb7904f.webp","tier":"","winRate":48.1,"sampleCount":9697,"why":"护甲"},{"id":"6665","name":"千变者贾修","icon":"https://data.aramkit.cn/assets/item/6665-3a29a273ed4d.webp","tier":"","winRate":48.1,"sampleCount":2170,"why":"护甲"},{"id":"3157","name":"中娅沙漏","icon":"https://data.aramkit.cn/assets/item/3157-633022d1ef8a.webp","tier":"","winRate":47.8,"sampleCount":1511,"why":"护甲"}],"profile":{"ad":4,"ap":1,"tank":1,"heal":1,"armor":1,"mr":0,"rows":[{"champion":"劫","icon":"https://data.aramkit.cn/assets/champion/238-79a7b1e73092.webp","dmg":"ad","tank":false,"heal":false},{"champion":"亚索","icon":"https://data.aramkit.cn/assets/champion/157-617df344cd83.webp","dmg":"ad","tank":false,"heal":false},{"champion":"卢锡安","icon":"https://data.aramkit.cn/assets/champion/236-d2c396fe20f4.webp","dmg":"ad","tank":false,"heal":false},{"champion":"盖伦","icon":"https://data.aramkit.cn/assets/champion/86-b9a5e5dd0854.webp","dmg":"ad","tank":true,"heal":false},{"champion":"索拉卡","icon":"https://data.aramkit.cn/assets/champion/16-22b3a9eee53e.webp","dmg":"ap","tank":false,"heal":true}],"summary":"物理 4 · 法系 1 · 坦克 1 · 回复倾向 1","advice":["对方偏物理：若被压，铁板靴 / 兰顿之兆更稳"]},"owned":[{"id":"1036","name":"长剑","icon":"https://data.aramkit.cn/assets/item/1036-6eabea8be9b9.webp","price":350,"cats":["Damage","Lane"],"tags":["攻击"],"final":false,"acq":"shop"},{"id":"3006","name":"狂战士胫甲","icon":"https://data.aramkit.cn/assets/item/3006-d954ceac7771.webp","price":1100,"cats":["AttackSpeed","Boots"],"tags":["攻速","鞋子"],"final":true,"acq":"shop"},{"id":"6676","name":"收集者","icon":"https://data.aramkit.cn/assets/item/6676-08cb1586917a.webp","price":3000,"cats":["Damage","CriticalStrike","ArmorPenetration"],"tags":["攻击","暴击","穿甲"],"final":true,"acq":"shop"}],"offPlan":[{"id":"3006","name":"狂战士胫甲","icon":"https://data.aramkit.cn/assets/item/3006-d954ceac7771.webp","price":1100,"cats":["AttackSpeed","Boots"],"tags":["攻速","鞋子"],"final":true,"acq":"shop"}],"progress":{"done":2,"total":8},"next":{"id":"1037","name":"十字镐","icon":"https://data.aramkit.cn/assets/item/1037-54297e56d10e.webp","price":875,"slot":"出门装","owned":false},"notes":["评分 = 组合胜率 + 构筑方向胜率 + 样本量对数加权；只做排序，不改变原始胜率。","出门装 / 鞋子 / 三件套来自同一条真实购买路线，后续成装为胜率最高的可选件。","已切换为「珠光手镯」专属样本；换掉海克斯后出装会重新计算。","敌方阵容已参与装备排序（加分项标在各件后面），属经验判断，非胜率因果。","对方偏物理：若被压，铁板靴 / 兰顿之兆更稳"]},"ocrText":"","ocrError":"","ocrEnabled":true,"region":[0.18,0.14,0.58,0.6],"opacity":0.92,"clickThrough":false,"autoOverlay":true,"theme":"dark","overlayActive":false,"overlayBounds":null,"overlayPosition":"right","overlayCollapsed":false,"overlayError":"","logs":[{"t":"19:42:10","msg":"演示数据：第 2 次海克斯，已选珠光手镯"}],"config":{},"manualMode":false,"stage":2,"stageMode":0,"topChampions":[{"id":"157","name":"亚索","title":"疾风剑豪","slug":"yasuo","riotId":"Yasuo","icon":"https://data.aramkit.cn/assets/champion/157-617df344cd83.webp","roles":["Fighter","Assassin"],"tier":"S","rank":1,"winRate":0.6048,"pickRate":0.127,"sampleCount":545846},{"id":"4","name":"崔斯特","title":"卡牌大师","slug":"twistedfate","riotId":"TwistedFate","icon":"https://data.aramkit.cn/assets/champion/4-6f3d7d0f980b.webp","roles":["Mage","Marksman"],"tier":"S","rank":2,"winRate":0.5792,"pickRate":0.1217,"sampleCount":523175},{"id":"114","name":"菲奥娜","title":"无双剑姬","slug":"fiora","riotId":"Fiora","icon":"https://data.aramkit.cn/assets/champion/114-f7e51288180c.webp","roles":["Fighter","Assassin"],"tier":"S","rank":3,"winRate":0.5689,"pickRate":0.074,"sampleCount":318024},{"id":"777","name":"永恩","title":"封魔剑魂","slug":"yone","riotId":"Yone","icon":"https://data.aramkit.cn/assets/champion/777-6d1f24b44ca1.webp","roles":["Fighter","Assassin"],"tier":"S","rank":4,"winRate":0.5617,"pickRate":0.1079,"sampleCount":463818},{"id":"887","name":"格温","title":"灵罗娃娃","slug":"gwen","riotId":"Gwen","icon":"https://data.aramkit.cn/assets/champion/887-52f020b016e8.webp","roles":["Fighter"],"tier":"S","rank":5,"winRate":0.5587,"pickRate":0.0443,"sampleCount":190435},{"id":"245","name":"艾克","title":"时间刺客","slug":"ekko","riotId":"Ekko","icon":"https://data.aramkit.cn/assets/champion/245-610fc7a2dc7e.webp","roles":["Assassin","Mage"],"tier":"S","rank":6,"winRate":0.555,"pickRate":0.1002,"sampleCount":430458},{"id":"223","name":"塔姆","title":"河流之王","slug":"tahmkench","riotId":"TahmKench","icon":"https://data.aramkit.cn/assets/champion/223-0409bb8a3b32.webp","roles":["Tank","Support"],"tier":"S","rank":7,"winRate":0.5544,"pickRate":0.1327,"sampleCount":570094},{"id":"40","name":"迦娜","title":"风暴之怒","slug":"janna","riotId":"Janna","icon":"https://data.aramkit.cn/assets/champion/40-57caece42647.webp","roles":["Support","Mage"],"tier":"S","rank":8,"winRate":0.5544,"pickRate":0.0243,"sampleCount":104310},{"id":"904","name":"亚恒","title":"不落魔锋","slug":"zaahen","riotId":"Zaahen","icon":"https://data.aramkit.cn/assets/champion/904-d27e3c292874.webp","roles":["Fighter"],"tier":"S","rank":9,"winRate":0.5518,"pickRate":0.0383,"sampleCount":164570},{"id":"5","name":"赵信","title":"德邦总管","slug":"xinzhao","riotId":"XinZhao","icon":"https://data.aramkit.cn/assets/champion/5-2d48c443d008.webp","roles":["Fighter","Tank"],"tier":"S","rank":10,"winRate":0.5509,"pickRate":0.0909,"sampleCount":390870},{"id":"427","name":"艾翁","title":"翠神","slug":"ivern","riotId":"Ivern","icon":"https://data.aramkit.cn/assets/champion/427-eed6d16e67fa.webp","roles":["Support","Mage"],"tier":"S","rank":11,"winRate":0.5472,"pickRate":0.0113,"sampleCount":48518},{"id":"11","name":"易","title":"无极剑圣","slug":"masteryi","riotId":"MasterYi","icon":"https://data.aramkit.cn/assets/champion/11-1ea2f7d83ffe.webp","roles":["Fighter","Assassin"],"tier":"S","rank":12,"winRate":0.5448,"pickRate":0.1021,"sampleCount":438584}],"topAugments":[{"id":"1095","name":"风语者的祝福","aliases":["Windspeaker's Blessing","windspeaker-s-blessing"],"slug":"windspeaker-s-blessing","icon":"https://data.aramkit.cn/assets/augment/1095-2e883b01ba1d.webp","rarity":"prismatic","tier":"S","rank":1,"winRate":0.593,"pickRate":0.0023,"sampleCount":61561,"availableStages":[1,2,3,4]},{"id":"1134","name":"亮出你的剑","aliases":["Draw Your Sword","draw-your-sword"],"slug":"draw-your-sword","icon":"https://data.aramkit.cn/assets/augment/1134-e20875a22664.webp","rarity":"prismatic","tier":"S","rank":2,"winRate":0.5753,"pickRate":0.0157,"sampleCount":426698,"availableStages":[1,2,3,4]},{"id":"3048","name":"弹跳蜜蜂","aliases":["Bouncing Bees","bouncing-bees"],"slug":"bouncing-bees","icon":"https://data.aramkit.cn/assets/augment/1337-508a6c4b3121.webp","rarity":"prismatic","tier":"S","rank":3,"winRate":0.5578,"pickRate":0.0071,"sampleCount":192851,"availableStages":[1,2,3]},{"id":"3163","name":"迷人蝴蝶","aliases":["Enchanting Butterflies","enchanting-butterflies"],"slug":"enchanting-butterflies","icon":"https://data.aramkit.cn/assets/augment/3163-8fd7dd0d8cb2.webp","rarity":"gold","tier":"S","rank":4,"winRate":0.5513,"pickRate":0.0076,"sampleCount":205697,"availableStages":[1,2,3,4]},{"id":"3078","name":"鼓声暴起 低音轰鸣","aliases":["The Boom and the Bass","the-boom-and-the-bass"],"slug":"the-boom-and-the-bass","icon":"https://data.aramkit.cn/assets/augment/3078-990e3c0de832.webp","rarity":"gold","tier":"S","rank":5,"winRate":0.5464,"pickRate":0.0686,"sampleCount":1859589,"availableStages":[1,2,3,4]},{"id":"1005","name":"喂呜喂呜","aliases":["Wee Woo Wee Woo","wee-woo-wee-woo"],"slug":"wee-woo-wee-woo","icon":"https://data.aramkit.cn/assets/augment/1005-62181e64467f.webp","rarity":"gold","tier":"S","rank":6,"winRate":0.5418,"pickRate":0.0031,"sampleCount":84854,"availableStages":[1,2,3,4]},{"id":"1420","name":"咏叹奏鸣","aliases":["Sonata","sonata"],"slug":"sonata","icon":"https://data.aramkit.cn/assets/augment/1420-436348f38794.webp","rarity":"gold","tier":"S","rank":7,"winRate":0.5383,"pickRate":0.0039,"sampleCount":106508,"availableStages":[1,2,3,4]},{"id":"3051","name":"蓝色屏障","aliases":["Blue Barrier","blue-barrier"],"slug":"blue-barrier","icon":"https://data.aramkit.cn/assets/augment/3051-dc247818a3e3.webp","rarity":"silver","tier":"S","rank":8,"winRate":0.5329,"pickRate":0.0125,"sampleCount":338909,"availableStages":[1,2,3,4]},{"id":"1053","name":"科学狂人","aliases":["Mad Scientist","mad-scientist"],"slug":"mad-scientist","icon":"https://data.aramkit.cn/assets/augment/1053-4b1ffcd2837d.webp","rarity":"prismatic","tier":"S","rank":9,"winRate":0.5311,"pickRate":0.0428,"sampleCount":1160193,"availableStages":[1,2,3,4]},{"id":"1315","name":"快中求稳","aliases":["Swift and Safe","swift-and-safe"],"slug":"swift-and-safe","icon":"https://data.aramkit.cn/assets/augment/1315-6cc281f38cf4.webp","rarity":"silver","tier":"S","rank":10,"winRate":0.5316,"pickRate":0.0087,"sampleCount":236946,"availableStages":[1,2,3,4]},{"id":"1389","name":"男爵之手","aliases":["Hand of Baron","hand-of-baron"],"slug":"hand-of-baron","icon":"https://data.aramkit.cn/assets/augment/1389-7472d9ea0245.webp","rarity":"prismatic","tier":"S","rank":11,"winRate":0.5311,"pickRate":0.0056,"sampleCount":152255,"availableStages":[2,3,4]},{"id":"1004","name":"回归基本功","aliases":["Back To Basics","back-to-basics"],"slug":"back-to-basics","icon":"https://data.aramkit.cn/assets/augment/1004-78e8488ef120.webp","rarity":"prismatic","tier":"S","rank":12,"winRate":0.53,"pickRate":0.0375,"sampleCount":1017206,"availableStages":[1,2,3,4]}]};
+let S = null, demo = false, searchKind = 'all', searchTimer = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const p1 = v => (Number(v)||0).toFixed(1) + '%';
+const num = v => Number(v||0);
+const ROLE_CN = {Assassin:'刺客',Fighter:'战士',Mage:'法师',Marksman:'射手',Support:'辅助',Tank:'坦克'};
+const rolesCn = list => (list||[]).map(r=>ROLE_CN[r]||r).join('/');
+function badge(t){ return '<span class="badge" data-t="'+esc(t||'')+'">'+esc(t||'-')+'</span>'; }
+function icon(u,cls){ return u ? '<img class="'+cls+'" src="'+esc(u)+'" alt="" loading="lazy">' : '<span class="'+cls+'"></span>'; }
+function stat(label,val,color,cls){
+  return '<div class="stat '+(cls||'')+'"><b class="'+(color||'')+'">'+esc(val)+'</b><span class="mini">'+esc(label)+'</span></div>';
+}
+async function ctrl(action,value,extra){
+  const payload = Object.assign({action,value}, extra||{});
+  try{ await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); }
+  catch(e){}
+  setTimeout(poll,250);
+}
+async function poll(){
+  try{
+    const r = await fetch('/api/state',{cache:'no-store'});
+    if(!r.ok) throw new Error('bad');
+    S = await r.json(); demo = false;
+  }catch(e){
+    if(!S){ S = DEMO_STATE; demo = true; }
+    else demo = false;
+  }
+  render();
+}
+
+function champRow(c, isSelf){
+  if(!c) return '';
+  const wr = p1((num(c.winRate)*100)), pr = p1((num(c.pickRate)*100));
+  const meta = esc(c.title||'')+' · #'+esc(c.rank||'-')+' · '+esc(rolesCn(c.roles));
+  if(document.body.classList.contains('compact')){
+    return '<div class="row">'+icon(c.icon,'ic')+
+      '<div class="nm"><b>'+esc(c.name)+' '+badge(c.tier)+
+      ' <span class="inline-wr '+(num(c.winRate)>=0.5?'pos':'neg')+'">'+wr+'</span>'+
+      (isSelf?' <span class="pos mini">当前</span>':'')+'</b><small>'+meta+'</small></div></div>';
+  }
+  return '<div class="row">'+
+    icon(c.icon,'ic')+
+    '<div class="nm"><b>'+esc(c.name)+ (isSelf?' <span class="pos mini">当前</span>':'') +'</b><small>'+esc(c.title||'')+' · 排名 #'+esc(c.rank||'-')+' · '+esc(rolesCn(c.roles))+'</small></div>'+
+    badge(c.tier)+
+    stat('胜率',wr, num(c.winRate)>=0.5?'pos':'neg','stat-win')+
+    stat('选取率',pr,'','stat-pick')+
+  '</div>';
+}
+
+function augCard(a, idx, isBest){
+  if(!a) return '';
+  const delta = num(a.delta);
+  const synDelta = num(a.synergyDelta);
+  const meta = [];
+  if(a.rarityLabel) meta.push(a.rarityLabel);
+  if(a.stages&&a.stages.length) meta.push('可用第 '+a.stages.join('/')+' 次');
+  const parts = [
+    '<div class="top">'+icon(a.icon,'ic')+
+      '<div class="nm"><b>'+esc(a.name)+(isBest?' <span class="pick">首选</span>':'')+'</b><small>'+esc(meta.join(' · '))+'</small></div>'+
+      badge(a.globalTier||a.tier)+'</div>',
+    '<div class="metrics">',
+      '<div class="metric"><b>'+p1(a.globalWinRate)+'</b>全局胜率</div>',
+      a.comboWinRate!=null
+        ? '<div class="metric"><b class="'+(delta>=0?'pos':'neg')+'">'+p1(a.comboWinRate)+'</b>本体搭配 '+(delta>=0?'+':'')+delta.toFixed(1)+'pp</div>'
+        : '<div class="metric"><b>'+p1(a.globalPickRate)+'</b>全局选取率</div>',
+      a.stageWinRate!=null ? '<div class="metric"><b>'+p1(a.stageWinRate)+'</b>第 '+esc(a.stage)+' 次胜率</div>' : '',
+      '<div class="metric metric-sample"><b>'+esc(num(a.comboSample||a.sampleCount).toLocaleString())+'</b>样本量</div>',
+    '</div>',
+    a.description ? '<div class="desc">'+esc(a.description)+'</div>' : '',
+    a.synergyWinRate!=null
+      ? '<div class="syn">与已选「'+esc(a.synergyPartner)+'」组合 '+p1(a.synergyWinRate)+'（'+(synDelta>=0?'+':'')+synDelta.toFixed(1)+'pp）</div>'
+      : '',
+    '<div class="score"><span class="tag">推荐 '+esc(a.score)+' / '+esc(a.grade)+'</span><span class="track"><i style="width:'+num(a.score)+'%"></i></span></div>',
+    '<div class="mini basis-line" style="margin-top:4px">'+esc(a.basis||'')+(a.stageOk===false?' · <span class="neg">本阶段不会出现，可能误识别</span>':'')+'</div>',
+    '<div class="btnrow aug-act" style="padding:5px 0 0;border:0"><button class="btn sm" onclick="ctrl(\'addAugment\','+esc(a.id)+')">选它 · 重算出装</button></div>',
+  ];
+  return parts.join('');
+}
+
+function renderBuild(b){
+  if(!b || !(b.steps||[]).length){
+    $('buildTag').textContent = '待计算';
+    $('nextBox').innerHTML = '';
+    $('enemyBox').classList.add('hide');
+    $('buildHead').innerHTML = '<div class="hint">先确定英雄（并选定海克斯），这里会给出来自真实购买路线的出装顺序。</div>';
+    $('buildSteps').innerHTML = ''; $('buildNotes').innerHTML=''; $('slotBox').innerHTML='';
+    $('slotAdvice').innerHTML=''; $('counterBox').innerHTML='';
+    return;
+  }
+  $('buildTag').textContent = esc(b.archetype||'推荐构筑');
+
+  // 下一件 + 已有进度
+  const nx = b.next, pr = b.progress||{done:0,total:0};
+  let nextHtml = '';
+  if(nx){
+    nextHtml = '<div class="next">'+icon(nx.icon,'ni')+'<div class="nt"><b>下一件：'+esc(nx.name)+'</b>'+
+      '<small>'+esc(nx.slot)+' · 已有 '+num(pr.done)+'/'+num(pr.total)+' 件</small></div>'+
+      (nx.price?'<span class="np">'+num(nx.price).toLocaleString()+' 金币</span>':'')+'</div>';
+  }else if(pr.total){
+    nextHtml = '<div class="next"><span class="np">计划内 '+num(pr.total)+' 件已出齐</span></div>';
+  }
+  if(b.offPlan&&b.offPlan.length){
+    nextHtml += '<div class="advice">计划外装备：'+b.offPlan.map(i=>esc(i.name)).join(' / ')+'（不在推荐路线内，针对性出装可忽略）</div>';
+  }
+  $('nextBox').innerHTML = nextHtml;
+
+  // 敌方阵容
+  const pf = b.profile;
+  if(pf){
+    const chips = [
+      pf.ad?['物理 '+pf.ad, pf.ad>=3?'hot':'']:null,
+      pf.ap?['法系 '+pf.ap, pf.ap>=3?'hot':'']:null,
+      pf.tank?['坦克 '+pf.tank, '']:null,
+      pf.heal?['回复 '+pf.heal, pf.heal>=2?'hot':'']:null,
+      pf.armor?['堆护甲 '+pf.armor, '']:null,
+      pf.mr?['堆魔抗 '+pf.mr, '']:null,
+    ].filter(Boolean).map(x=>'<span class="chip'+(x[1]?' '+x[1]:'')+'"'+(x[1]?' style="border-color:var(--good);color:var(--good)"':'')+'>'+esc(x[0])+'</span>').join('');
+    $('enemyBox').classList.remove('hide');
+    $('enemyBox').innerHTML = '<span class="lb">敌方</span>'+chips+
+      (pf.advice&&pf.advice.length?'<div style="width:100%;font-size:10.5px;color:var(--muted);margin-top:2px">· '+pf.advice.map(esc).join('<br>· ')+'</div>':'');
+  }else{
+    $('enemyBox').classList.add('hide');
+    $('enemyBox').innerHTML='';
+  }
+
+  $('buildHead').innerHTML =
+    '<div class="kv"><span>数据来源</span><b>'+esc(b.source||'')+'</b></div>'+
+    '<div class="kv"><span>构筑方向 / 三件套胜率</span><b>'+esc(b.archetype||'-')+' · '+p1(b.winRate)+'</b></div>'+
+    '<div class="kv"><span>样本量 / 选取率</span><b>'+num(b.sampleCount).toLocaleString()+' · '+p1(b.pickRate)+'</b></div>'+
+    (b.augmentsUsed&&b.augmentsUsed.length?'<div class="kv"><span>已联动海克斯</span><b>'+esc(b.augmentsUsed.join(' / '))+'</b></div>':'');
+
+  const ownedMap = {};
+  (b.order||[]).forEach(o=>{ ownedMap[o.id]=o.owned; });
+  $('buildSteps').innerHTML = b.steps.map(s=>{
+    const items = (s.items||[]).map(i=>{
+      const own = ownedMap[i.id];
+      return '<span class="it">'+icon(i.icon,'ic sm')+esc(i.name)+(own?'<span class="own">✓</span>':'')+'</span>';
+    }).join('');
+    const why = (s.why||[]).map(w=>'<span class="tag-mini hot">'+esc(w)+'</span>').join('');
+    return '<div class="step"><div class="no">'+esc(s.slot)+'</div><div class="its">'+items+why+'</div>'+
+      '<div class="stat"><b>'+(s.winRate!=null?p1(s.winRate):'-')+'</b><span class="mini">胜率</span></div></div>';
+  }).join('');
+
+  // 分件替换建议
+  const adv = b.slotAdvice||[];
+  $('slotAdvice').innerHTML = adv.length
+    ? '<div class="hint" style="margin-bottom:4px">分件替换：同位置有更高胜率的成品</div>'+
+      adv.map(x=>'<div class="adv-1">'+esc(x.slot)+'：路线 <b>'+esc(x.current.name)+'</b> → 可换 <b>'+esc(x.best.name)+'</b> '+p1(x.best.winRate)+'（+'+
+        esc(x.gain)+'pp，'+num(x.best.sampleCount).toLocaleString()+' 场）</div>').join('')
+    : '';
+
+  // 针对性备选
+  const cs = b.counters||[];
+  $('counterBox').innerHTML = cs.length
+    ? '<div class="hint" style="margin-bottom:5px">针对性备选 · 敌方阵容驱动（平均胜率偏低属正常，克制价值不体现在均值里）</div>'+
+      cs.map(x=>'<div class="adv-1" style="display:flex;align-items:center;gap:6px">'+icon(x.icon,'ic sm')+
+        '<b>'+esc(x.name)+'</b><span class="tag-mini hot">'+esc(x.why)+'</span>'+
+        '<span class="mini">'+p1(x.winRate)+' · '+num(x.sampleCount).toLocaleString()+' 场</span></div>').join('')
+    : '';
+
+  $('buildNotes').innerHTML = (b.notes||[]).map(n=>'· '+esc(n)).join('<br>');
+
+  const slots = b.slotRanking||{};
+  const keys = Object.keys(slots).sort((a,b)=>Number(a)-Number(b));
+  $('slotBox').innerHTML = keys.length
+    ? '<div class="hint" style="margin-bottom:6px">按「第 N 件」统计的综合最优备选（胜率 + 样本量 + 敌方阵容加权）</div>'+
+      keys.map(k=>'<div class="step"><div class="no">第 '+esc(k)+' 件</div><div class="its">'+
+        slots[k].map(i=>'<span class="it">'+icon(i.icon,'ic sm')+esc(i.name)+'<small>'+p1(i.winRate)+'</small>'+
+          (i.why||[]).map(w=>'<span class="tag-mini hot">'+esc(w)+'</span>').join('')+'</span>').join('')+'</div></div>').join('')
+    : '<div class="hint">选定海克斯后显示分件备选。</div>';
+}
+
+function render(){
+  if(!S) return;
+  const st = S;
+  $('demoBanner').classList.toggle('hide',!demo);
+  $('errBanner').classList.toggle('hide',!st.error);
+  if(st.error) $('errBanner').textContent = st.error;
+  document.documentElement.setAttribute('data-theme', st.theme==='light'?'light':'dark');
+  const qs = new URLSearchParams(location.search);
+  const isOverlay = qs.get('overlay')==='1';
+  const collapsed = isOverlay && qs.get('full')!=='1' && st.overlayCollapsed !== false;
+  if(isOverlay) document.body.classList.add('overlay','compact');
+  document.body.classList.toggle('collapsed', collapsed);
+  $('miniDot').className = 'dot '+((!demo && st.clientConnected)?'on':(demo?'':'off'));
+  $('miniText').textContent = [
+    st.championName || 'ARAM 助手',
+    (st.candidates||[]).length ? (st.candidates.length+' 个海克斯') : '',
+    (st.selectedAugments||[]).length ? ('已选 '+st.selectedAugments.length) : '',
+  ].filter(Boolean).join(' · ');
+
+  const connected = !demo && st.clientConnected;
+  $('statusDot').className = 'dot '+(connected?'on':(demo?'':'off'));
+  $('statusText').textContent = demo ? '演示数据' : (connected? '客户端已连接 · '+st.phase : '未检测到 League 客户端');
+  $('phaseTag').textContent = st.phase==='ChampSelect'?'英雄选择中':(st.phase==='InProgress'?'对局中 · '+Math.floor(num(st.gameTime)/60)+'分':st.phase);
+  $('dataTag').textContent = 'v'+esc(st.version)+' · '+esc(st.dataDate)+' · '+(st.dataset==='high'?'高分段':'全分段');
+
+  // 1 英雄
+  const c = st.champion;
+  $('champNow').innerHTML = c ? champRow(c,true) : '';
+  const bench = (st.bench||[]).filter(x=>String(x.id)!==String(st.championId));
+  $('benchList').innerHTML = bench.map(x=>champRow(x, String(x.id)===String(st.myChampionId))).join('');
+  $('benchHint').classList.toggle('hide', bench.length>0 || !!c);
+  if(!bench.length && !c) $('benchHint').textContent='进入大乱斗英雄选择后，这里会列出共享备选席里每个英雄的排名、梯队、胜率与选取率。';
+  else if(!bench.length && c) $('benchHint').textContent='当前不在英雄选择阶段。上方显示本局英雄。';
+
+  // 2 海克斯
+  const cards = st.candidates||[];
+  const bestScore = cards.length ? Math.max(...cards.map(a=>num(a.score))) : 0;
+  $('augCards').innerHTML = cards.map((a,i)=>
+    '<div class="aug'+(a.stageOk===false?' dimmed':'')+'">'+augCard(a,i,num(a.score)===bestScore)+'</div>').join('');
+  $('augHint').classList.toggle('hide', cards.length>0);
+  if(!cards.length) $('augHint').textContent = st.ocrError ? ('识别不可用：'+st.ocrError+' — 可用下方「手动添加海克斯」') : '海克斯卡牌出现时，会自动识别屏幕并显示胜率、选取率与评级。';
+  $('stageTag').textContent = '第 '+num(st.stage||1)+' 次'+(st.stageMode?' · 手动':'');
+  $('ocrTag').textContent = st.ocrError ? 'OCR 异常' : (st.ocrEnabled? 'OCR 自动识别' : 'OCR 已关闭');
+  const sel = st.selectedAugments||[];
+  $('selectedChips').innerHTML = sel.length ? '<span class="mini" style="width:100%">已选海克斯（出装据此重算）</span>'+sel.map(a=>
+    '<span class="chip">'+esc(a.name)+' '+badge(a.globalTier||a.tier)+'<x onclick="ctrl(\'removeAugment\',\''+esc(a.id)+'\')">×</x></span>').join('') : '';
+  $('ocrLog').textContent = (st.ocrText||'') + (st.ocrError?'\n[状态] '+st.ocrError:'') || '暂无';
+  $('btnOcrToggle').textContent = st.ocrEnabled?'已开启':'已关闭';
+  $('btnOcrToggle').classList.toggle('on',!!st.ocrEnabled);
+  const autoOn = st.autoOverlay !== false;   // 演示数据缺字段时按默认开启处理
+  $('btnAutoOverlay').textContent = autoOn?'已开启':'已关闭';
+  $('btnAutoOverlay').classList.toggle('on',autoOn);
+
+  // 3 出装
+  renderBuild(st.build);
+
+  // 设置
+  document.querySelectorAll('[data-ds]').forEach(b=>b.classList.toggle('on', b.dataset.ds===st.dataset));
+  document.querySelectorAll('[data-pos]').forEach(b=>b.classList.toggle('on', b.dataset.pos===(st.overlayPosition||'right')));
+  document.querySelectorAll('[data-stage]').forEach(b=>b.classList.toggle('on', String(st.stageMode||0)===b.dataset.stage));
+  $('opacity').value = Math.round(num(st.opacity||0.96)*100);
+  $('btnOverlay').textContent = st.overlayActive?'关闭浮窗':'开启浮窗';
+  $('btnOverlay').classList.toggle('on',!!st.overlayActive);
+  $('btnClick').textContent = st.clickThrough?'穿透已开':'穿透已关';
+  $('btnClick').classList.toggle('on',!!st.clickThrough);
+  const r = st.region||[0.18,0.14,0.64,0.60];
+  ['rx','ry','rw','rh'].forEach((id,i)=>{ $(id).value = r[i]; });
+  $('logBox').textContent = (st.logs||[]).map(l=>'['+l.t+'] '+l.msg).join('\n') || '暂无日志';
+}
+
+// ---------- 连接自检 ----------
+async function diagnose(){
+  try{
+    const r = await fetch('/api/diagnose',{cache:'no-store'});
+    const d = await r.json();
+    $('diagList').innerHTML = (d.checks||[]).map(c=>
+      '<div class="kv"><span><span class="dot '+(c.ok?'on':'off')+'"></span>'+esc(c.label)+'</span>'+
+      '<b style="max-width:62%;text-align:right;font-weight:500">'+esc(c.detail)+'</b></div>'
+    ).join('');
+    $('diagHint').textContent = d.hint||'';
+  }catch(e){
+    $('diagList').innerHTML = '<div class="hint">本地服务未启动：运行 start.bat 或 setup_autostart.bat 后再点「重新检测」。</div>';
+    $('diagHint').textContent = '';
+  }
+}
+$('btnDiagRefresh').onclick = diagnose;
+$('btnTestOverlay').onclick = ()=>{ ctrl('testOverlay'); setTimeout(diagnose,3500); };
+$('btnRedetect').onclick = ()=>{ ctrl('redetect'); setTimeout(diagnose,2500); };
+$('btnOpenConsole').onclick = ()=> window.open('http://127.0.0.1:8765/','_blank');
+
+// ---------- 交互 ----------
+$('btnTheme').onclick = ()=> ctrl('setTheme', document.documentElement.getAttribute('data-theme')==='light'?'dark':'light');
+$('btnRefresh').onclick = ()=>{ fetch('/api/refresh',{method:'POST',body:'{}'}); setTimeout(poll,600); };
+$('btnOcrNow').onclick = async ()=>{
+  $('ocrTag').textContent='识别中...';
+  try{ const r = await fetch('/api/ocr',{method:'POST',body:'{}'}); await r.json(); }catch(e){}
+  poll();
+};
+$('btnClearAug').onclick = ()=> ctrl('clearAugments');
+$('btnClearManual').onclick = ()=> ctrl('clearManual');
+$('btnItemset').onclick = async ()=>{
+  const r = await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'itemset'})});
+  const j = await r.json().catch(()=>({ok:false,error:'服务未响应'}));
+  $('errBanner').classList.remove('hide');
+  $('errBanner').textContent = j.ok ? '已写入游戏内配装方案，请在商店「配装方案」中查看。' : ('写入失败：'+(j.error||'未知错误'));
+  setTimeout(()=>$('errBanner').classList.add('hide'),5000);
+};
+$('btnSlot').onclick = ()=> $('slotBox').classList.toggle('hide');
+$('btnOcrToggle').onclick = ()=> ctrl('setOcr',!S.ocrEnabled);
+$('btnAutoOverlay').onclick = ()=> ctrl('setAutoOverlay', S.autoOverlay===false);
+$('btnOverlay').onclick = ()=> ctrl(S.overlayActive?'closeOverlay':'launchOverlay', null, {fromUser:true});
+$('btnClick').onclick = ()=> ctrl('setClickThrough',!S.clickThrough);
+$('opacity').onchange = e => ctrl('setOpacity', Number(e.target.value)/100);
+document.querySelectorAll('[data-ds]').forEach(b=> b.onclick = ()=> ctrl('setDataset', b.dataset.ds));
+document.querySelectorAll('[data-pos]').forEach(b=> b.onclick = ()=> ctrl('setOverlayPosition', b.dataset.pos));
+document.querySelectorAll('[data-stage]').forEach(b=> b.onclick = ()=> ctrl('setStage', Number(b.dataset.stage)));
+$('btnFull').onclick = ()=> window.open('http://127.0.0.1:8765/','_blank');
+$('btnExpand').onclick = ()=> ctrl('setCollapsed', false);
+$('btnCollapse').onclick = ()=> ctrl('setCollapsed', true);
+['rx','ry','rw','rh'].forEach(id=> $(id).onchange = ()=> ctrl('setRegion', ['rx','ry','rw','rh'].map(k=>Number($(k).value))));
+
+function openSearch(kind){
+  searchKind = kind;
+  $('searchBox').classList.remove('hide');
+  $('searchInput').value=''; $('searchResults').classList.add('hide');
+  $('searchInput').focus();
+}
+$('btnManualChampion').onclick = ()=> openSearch('champion');
+$('btnAddAugment').onclick = ()=> openSearch('augment');
+$('searchInput').oninput = e=>{
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if(!q){ $('searchResults').classList.add('hide'); return; }
+  searchTimer = setTimeout(async ()=>{
+    try{
+      const r = await fetch('/api/search?q='+encodeURIComponent(q)+'&kind='+searchKind,{cache:'no-store'});
+      const j = await r.json();
+      const list = (j.results||[]).slice(0,12);
+      $('searchResults').innerHTML = list.length ? list.map(x=>
+        '<div data-kind="'+esc(x.kind)+'" data-id="'+esc(x.id)+'">'+icon(x.icon,'ic sm')+'<span>'+esc(x.name)+'</span><small class="mini">'+esc(x.sub||'')+'</small></div>'
+      ).join('') : (demo? '<div>演示模式下无法搜索，请先启动 start.bat</div>' : '<div>无匹配结果</div>');
+      $('searchResults').classList.remove('hide');
+      $('searchResults').querySelectorAll('div[data-id]').forEach(el=> el.onclick = ()=>{
+        ctrl(el.dataset.kind==='champion'?'setChampion':'addAugment', el.dataset.id);
+        $('searchBox').classList.add('hide');
+      });
+    }catch(e){}
+  },220);
+};
+$('searchInput').onkeydown = e=>{ if(e.key==='Escape') $('searchBox').classList.add('hide'); };
+
+poll();
+diagnose();
+setInterval(poll,1200);
+setInterval(diagnose,12000);
+</script>
+</body>
+</html>

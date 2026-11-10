@@ -1,0 +1,21 @@
+{
+  "dataset": "high",
+  "ocrEnabled": true,
+  "ocrInterval": 3.5,
+  "region": [
+    0.18,
+    0.14,
+    0.58,
+    0.6
+  ],
+  "opacity": 0.92,
+  "clickThrough": false,
+  "theme": "dark",
+  "autoOpenBrowser": true,
+  "autoOverlay": true,
+  "autoCloseOverlay": false,
+  "overlayPosition": "right",
+  "overlayWidth": 400,
+  "overlayHeight": 820,
+  "overlayCollapsed": true
+}
