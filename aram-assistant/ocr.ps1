@@ -31,6 +31,26 @@ try {
         exit 2
     }
 
+    # 卡牌字号偏小，放大 2 倍再识别可明显提升中文命中率；失败则退回原图。
+    $upscaled = $null
+    try {
+        Add-Type -AssemblyName System.Drawing
+        $srcImg = [System.Drawing.Image]::FromFile($Path)
+        $nw = [int]($srcImg.Width * 2); $nh = [int]($srcImg.Height * 2)
+        $dstImg = New-Object System.Drawing.Bitmap($nw, $nh)
+        $gfx = [System.Drawing.Graphics]::FromImage($dstImg)
+        $gfx.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $gfx.DrawImage($srcImg, 0, 0, $nw, $nh)
+        $gfx.Dispose(); $srcImg.Dispose()
+        $upscaled = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'aram_ocr_2x.png')
+        $dstImg.Save($upscaled, [System.Drawing.Imaging.ImageFormat]::Png)
+        $dstImg.Dispose()
+        $Path = $upscaled
+    } catch {
+        if ($upscaled) { Remove-Item $upscaled -ErrorAction SilentlyContinue }
+        $upscaled = $null
+    }
+
     $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Path)) ([Windows.Storage.StorageFile])
     $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
@@ -56,6 +76,7 @@ try {
     foreach ($line in $result.Lines) { Write-Output $line.Text }
 
     $stream.Dispose()
+    if ($upscaled) { Remove-Item $upscaled -ErrorAction SilentlyContinue }
 } catch {
     Write-Output ('__OCR_ERROR__' + $_.Exception.Message)
     exit 3

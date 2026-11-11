@@ -245,13 +245,6 @@ class LeagueClient:
                 my_champ = cid
         return {"bench": bench, "myChampion": my_champ, "team": team, "raw": s}
 
-    def current_summoner(self):
-        try:
-            s = self._lcu("/lol-summoner/v1/current-summoner")
-            return {"summonerId": s.get("summonerId"), "gameName": s.get("gameName"), "displayName": s.get("displayName")}
-        except Exception:
-            return {}
-
     def live_game(self):
         """返回 {'me': {...}, 'allies': [...], 'enemies': [...], 'gameTime': s}"""
         try:
@@ -283,45 +276,3 @@ class LeagueClient:
             "gameTime": d.get("gameData", {}).get("gameTime", 0),
             "gameMode": d.get("gameData", {}).get("gameMode", ""),
         }
-
-    # ---------- 可选：写入游戏内配装方案 ----------
-    def push_item_set(self, title, blocks, champion_id=0):
-        """通过官方 LCU 接口写入一套自定义出装（仅在用户明确点击时调用）。"""
-        summoner = self.current_summoner()
-        sid = summoner.get("summonerId")
-        if not sid:
-            raise RuntimeError("无法读取当前召唤师信息")
-        payload = {
-            "associatedChampions": [champion_id] if champion_id else [],
-            "associatedMaps": [],
-            "blocks": [
-                {
-                    "type": b.get("title", "推荐"),
-                    "items": [{"id": str(i), "count": 1} for i in b.get("items", [])],
-                }
-                for b in blocks
-            ],
-            "map": "any",
-            "mode": "any",
-            "preferredItemSlots": [],
-            "sortrank": 1,
-            "startedFrom": "blank",
-            "title": title,
-            "type": "custom",
-            "uid": "aram-assistant-%d" % int(time.time()),
-        }
-        url = "https://127.0.0.1:%d/lol-item-sets/v1/item-sets/%s/sets" % (self.port, sid)
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method="POST",
-            headers={
-                "Authorization": self._auth(),
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=5, context=_SSL) as r:
-            r.read()
-        return True

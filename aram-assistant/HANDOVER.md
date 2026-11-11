@@ -15,9 +15,9 @@
 |---|---|---|---|
 | 1 | 英雄选择时给出每个英雄的排行和胜率 | LCU 读取共享备选席 `benchChampions`，列出排名/梯队/胜率/选取率并按胜率排序 | `champion-rankings.json` |
 | 2 | 海克斯出现后显示选取率、胜率、评级 | 屏幕 OCR 识别三选一卡牌 + 模糊匹配；展示全局胜率/选取率/梯队/稀有度、**本英雄搭配胜率与 ±pp**、**第 N 次阶段胜率与阶段排名**、**与已选海克斯的组合胜率**、卡牌原文说明、综合推荐分 | `augment-rankings.json`（含 `stages.1~4`）+ `champion-details/{id}.json` + `resources/augments.json` |
-| 3 | 结合当前海克斯推荐出装与顺序 | 按已选海克斯切换专属样本，输出「出门装 → 鞋子 → 第 1/2/3 件 → 后续成装」，可一键写入游戏内配装方案 | `champion-details/{id}-single-augments.json` |
+| 3 | 结合当前海克斯推荐出装与顺序 | 按已选海克斯切换专属样本，输出「出门装 → 鞋子 → 第 1/2/3 件 → 后续成装」 | `champion-details/{id}-single-augments.json` |
 | 4 | 出装要跟着敌方阵容走 | 由敌方英雄职责 + 已买装备推断物理/法系/坦克/回复/堆抗性，折算为装备加分并给出针对性备选；加成原因标在装备后面 | `resources/items.json`（categories + tooltip）+ `item-rankings.json` |
-| 5 | 对局中知道「下一件买什么」 | 读 Live Client Data 的己方装备，标出已有 / 下一件 / 计划外，分件位置给出更高胜率的替换建议 | `item-rankings.json` + `champion-details/{id}.json` 的 `items.slots` |
+| 5 | 对局中知道「下一件买什么」 | 读 Live Client Data 的己方装备，按实际已出成品数推进到下一件；排除已买与重复鞋子后，列出这一件胜率最高的 3 个 | `item-rankings.json` + `champion-details/{id}.json` 的 `items.slots` + 购买路线 |
 
 **合规性**：只读 Riot 官方本地接口（LCU、Live Client Data）与自身屏幕；不读游戏内存、不注入进程、不修改游戏文件、不自动化输入。仍属第三方软件，Riot 不公布批准名单，使用前需自行确认所在服务器规则。
 
@@ -35,7 +35,8 @@
 - 自检接口：`http://127.0.0.1:8765/api/diagnose`
 
 ### 浮窗形态
-- **默认收起**：右上角一条 `236×48` 小胶囊，显示「英雄 · N 个海克斯 · 已选 N」，点「展开」才变成 `400×820` 完整面板，点「收起」回去。
+- **默认收起**：右上角一条 `260×92` 小胶囊，显示「英雄 · N 个海克斯 · 已选 N」，点「展开」才变成 `400×820` 完整面板，点「收起」回去。
+- **智能展开（默认开）**：对局中平时保持小胶囊，只在「海克斯三选一出现」或「商店打开」时自动展开成完整面板；离开商店、选完海克斯后自动收回胶囊。英雄选择阶段仍照旧自动弹出（备选席排行就是要在这时看）。
 - 完整面板只显示三大信息块；自检、设置、日志在浮窗里自动隐藏（控制台里可见）。
 - 位置可切左/中/右（默认右，避开中央卡牌区）；透明度、点击穿透可调。
 - 卡牌在浮窗里压缩为：名字+首选徽章 / 三列指标 / 2 行说明 / 组合协同 / 推荐条 / 一键选取；说明与解释行在紧凑模式下隐藏，避免超过 820px。
@@ -61,18 +62,25 @@ ARAMKit 公开 JSON (data.aramkit.cn)
    Engine（engine.py）
    ├─ 英雄/海克斯评级加权（组合样本 + 第 N 次阶段 + 与已选海克斯的成对组合）
    ├─ 敌方阵容画像（职责 + 已买装备）→ 装备加减分与克制备选
-   └─ 按海克斯合并出装顺序 + 当前装备核对（下一件 / 计划外 / 分件替换）
+   └─ 按海克斯合并出装顺序 + 当前装备核对（按实际成品数推进下一件 / 胜率前三）
         ▲
         │  app.py（HTTP 服务 127.0.0.1:8765 + 后台线程）
         ├── league.py ── LCU (端口由 lockfile/日志发现) + Live Client Data (2999)
-        ├── vision.py ─ GDI 截屏 → Windows.Media.Ocr → 模糊匹配
-        ├── window.py ─ Edge/Chrome --app 无边框窗 + Win32 置顶/透明/穿透
+        ├── vision.py ─ GDI 截屏 → Windows.Media.Ocr → 模糊匹配；`detect_shop` 用关键词判断商店是否打开
+        ├── window.py ─ Edge/Chrome --app 无边框窗 + Win32 置顶/透明/穿透；`is_game_foreground` 前台守卫
         └── watcher.py ─ 检测客户端进程，监管服务
         ▼
    ui/index.html（单页控制台 / 浮窗，轮询 /api/state）
 ```
 
-后台线程：`poll_loop`（1.2s，游戏状态）、`ocr_loop`（3.5s）、`topmost_loop`（0.3s，重新置顶）、`watcher` 独立进程（5s）。
+后台线程：`poll_loop`（1.2s，游戏状态 + 智能展开判定）、`ocr_loop`（0.5s tick；海克斯 3.5s、商店 2.0s 到期才识别）、`topmost_loop`（0.3s，重新置顶）、`watcher` 独立进程（5s）。
+
+**智能展开状态机**（`app.py` → `_decision_token` / `_apply_smart_visibility`）：
+- 决策 token：`bench`（英雄选择阶段）、`offer:<三张卡 id>`（卡面 10s 内见过）、`shop:<第几次商店>`（商店 4.5s 内命中过）；空串 = 无决策。
+- 只有 token 变化才动窗口（`setCollapsed`），避免识别抖动导致面板反复伸缩。
+- 只在 `ChampSelect / InProgress / GameStart / Reconnect` 生效，且**只在游戏窗口位于前台时**才动作：点浮窗/切浏览器时状态冻结，不会把面板顺手收走。
+- 用户在决策时刻手动收起/展开会写入同一份状态，本决策时刻内不再自动纠正；下一次决策/下一局重新接管。
+- 商店识别与海克斯识别解耦：即使关掉「海克斯 OCR」，只要智能模式开着，仍会做商店识别。
 
 ---
 
@@ -82,8 +90,8 @@ ARAMKit 公开 JSON (data.aramkit.cn)
 |---|---|
 | `app.py` | HTTP 服务、状态机、所有 API、控制动作、`/api/diagnose`；阶段推断（已选数量+1，可手动覆盖） |
 | `datafeed.py` | ARAMKit JSON 客户端：版本发现、缓存、进程内 TTL memo、名称/图标/装备类别与说明文本、索引 |
-| `engine.py` | 海克斯评级（组合/阶段/协同）、敌方阵容画像、出装排序、分件替换、实时装备核对、搜索 |
-| `league.py` | LCU 连接（多路径凭据发现）、Live Client Data、配装方案写入 |
+| `engine.py` | 海克斯评级（组合/阶段/协同）、敌方阵容画像、出装排序、各件位胜率排行与序贯推荐、实时装备核对、搜索 |
+| `league.py` | LCU 连接（多路径凭据发现）、Live Client Data |
 | `vision.py` | GDI 抓屏、PNG 编码、Windows OCR、`match_augments` 模糊匹配 |
 | `ocr.ps1` | PowerShell WinRT OCR（优先中文识别器） |
 | `window.py` | 浮窗创建/摆位/折叠/置顶/透明度/点击穿透 |
@@ -124,7 +132,7 @@ ARAMKit 公开 JSON (data.aramkit.cn)
   「重伤」没有独立 category，只能从 tooltip 文本里找。
 - `resources/augments.json`：`tooltip` 富文本 → 三选一时的卡牌原文说明。
 - `champion-details/{id}.json` → `augmentCombinations[]`：`{augmentIds:[a,b], winRate, sampleCount}`，**只有成对样本**，没有 3 个以上的组合。
-- `champion-details/{id}.json` → `items.filtered.slots{"1".."6"}`：本英雄每个位置的装备样本，用于分件替换与克制备选。
+- `champion-details/{id}.json` → `items.filtered.slots{"1".."6"}`：本英雄每个件位的装备样本，用于「下一件」胜率前三与克制备选。
 
 `champion-details/{id}-single-augments.json` 的结构要点：
 ```
@@ -153,7 +161,6 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 英雄选择：`/lol-champ-select/v1/session` → `benchChampions` / `myTeam` / `localPlayerCellId`
 - 阶段：`/lol-gameflow/v1/gameflow-phase`
 - 对局：`https://127.0.0.1:2999/liveclientdata/allgamedata` → `allPlayers`（英雄名、装备、阵营）
-- 可选写入：`POST /lol-item-sets/v1/item-sets/{summonerId}/sets`（仅用户点击「写入游戏内配装方案」时）
 
 > Riot 的接口**不暴露海克斯卡牌**，这是必须走屏幕 OCR 的原因（商业插件同理）。
 
@@ -165,7 +172,7 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - **DPI**：`GetDeviceCaps(LOGPIXELSX)/96` 得到缩放（本机 125%）；Chromium 的 `--window-size/position` 用逻辑像素需除以 scale，Win32 `SetWindowPos` 用物理像素。
 - **64 位句柄**：`HWND_TOPMOST` 必须是 `ctypes.c_void_p(-1)`，直接传 int `-1` 会被截成 `0xFFFFFFFF` 导致 `SetWindowPos` 静默失败（曾导致浮窗永远被游戏盖住）。模块级已声明 argtypes。
 - **置顶**：`attach_to_game()`（`GWLP_HWNDPARENT` 附属到 `RiotWindowClass`）+ `keep_on_top()`，由 `topmost_loop` 每 0.3s 重新置顶；必要时把游戏窗口从 TOPMOST 降级。
-- **折叠**：`set_collapsed()` 改窗口尺寸（收起 236×46 / 展开 400×820），右边缘固定。
+- **折叠**：`set_collapsed()` 改窗口尺寸（收起 260×92 / 展开 400×820），右边缘固定。
 - **OCR 与浮窗互不干扰**：识别区默认 `[0.18, 0.14, 0.58, 0.60]`，右边界 0.76；浮窗在最右 0.84 之后，不会被 OCR 读到自己的文字。
 - 点击穿透：`WS_EX_TRANSPARENT`；透明度：`WS_EX_LAYERED` + `SetLayeredWindowAttributes`。
 
@@ -184,6 +191,11 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | `autoOpenBrowser` | `true` | 手动 start.bat 时自动开浏览器 |
 | `autoOverlay` | `true` | 进入选人/对局自动弹浮窗 |
 | `autoCloseOverlay` | `false` | **默认不自动关**，避免 LCU 抖动导致"弹一下就没" |
+| `smartShow` | `true` | 智能展开：只在海克斯三选一 / 商店打开时展开，其余时间收成胶囊 |
+| `shopRegion` | `[0,0.02,0.72,0.18]` | 商店识别区域（屏幕比例，框商店顶部标签/搜索栏），控制台可调 |
+| `shopInterval` | `2.0` | 商店状态识别间隔（秒） |
+| `shopGrace` | `4.5` | 商店看不见后仍算"在商店"的宽限，避免翻页/动画时误收 |
+| `offerGrace` | `10.0` | 海克斯卡面消失后仍算"在选海克斯"的宽限 |
 | `overlayPosition` | `right` | `left` / `center` / `right` |
 | `overlayWidth` / `overlayHeight` | `400` / `820` | 展开态物理像素 |
 | `overlayCollapsed` | `true` | 默认收起成小胶囊 |
@@ -205,12 +217,14 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | POST | `/api/ocr` | 立即识别一次 |
 | POST | `/api/refresh` | 重新同步数据 |
 
-`control` 动作：`setChampion`、`clearManual`、`addAugment`、`removeAugment`、`clearAugments`、`setStage`（0=自动，1~4=手动）、`setDataset`、`setOcr`、`setRegion`、`setTheme`、`setOpacity`、`setClickThrough`、`setAutoOverlay`、`setOverlayPosition`、`setCollapsed`、`launchOverlay`、`testOverlay`、`closeOverlay`、`redetect`、`itemset`、`refresh`。
+`control` 动作：`setChampion`、`clearManual`、`addAugment`、`removeAugment`、`clearAugments`、`setStage`（0=自动，1~4=手动）、`setDataset`、`setOcr`、`setRegion`、`setTheme`、`setOpacity`、`setClickThrough`、`setAutoOverlay`、`setSmartShow`、`setShopRegion`、`testShop`、`setOverlayPosition`、`setCollapsed`、`launchOverlay`、`testOverlay`、`closeOverlay`、`redetect`、`refresh`。
 
 `/api/state` 里与新增功能相关的字段：
 - 顶层 `stage` / `stageMode`：当前第几次海克斯、是否手动指定。
+- `smartShow` / `decision`（`bench`/`offer`/`shop`/空）/ `overlayCollapsed`（当前实际折叠态）/ `overlayCollapsedPref`（用户偏好）。
 - `candidates[]`：除原有胜率/评级外，新增 `description`（卡牌原文）、`stageWinRate` / `stageRank` / `stageOk`、`synergyWinRate` / `synergyPartner` / `synergyDelta`、`scoreBase` / `scoreStage` / `scoreSynergy`。
-- `build`：新增 `profile`（敌方画像与建议）、`next` / `owned` / `offPlan` / `progress`（实时装备核对）、`slotAdvice[]`（分件替换）、`counters[]`（针对性备选）。
+- 商店识别：`shopOpen`、`shopHit`（命中的关键词）、`shopText`（OCR 原文，调试用）、`shopError`、`shopRegion`。
+- `build`：新增 `profile`（敌方画像与建议）、`next` / `owned` / `offPlan` / `progress`（实时装备核对）、`slotRanking`（各分件位置候选）、`picks`（按实际已出成品数推进的下一件前三）、`counters[]`（针对性备选）。`picks` 规则：已出成品数（`final && acq=shop && price>=900`，含成装鞋）决定「第 N 件」；排除已买、样本 <800、非商店成品、已有鞋子时的其它鞋；按原始胜率排序；`route` 标记表示真实购买路线里紧随已出装备的接法，仅作标签、不改排序。
 
 
 ---
@@ -230,11 +244,14 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | 紧凑模式右侧被裁 | 400 物理像素 = 320 CSS 像素，行内列过多 | 梯队+胜率内联到名字后，按钮移到卡片底部 |
 | Edge 单例锁导致新进程退出 | 复用 profile 残留锁 | 每次独立 profile，清理 1 天前旧目录 |
 | 克制备选推「金铲铲 / 虚空献祭」 | 这类 ARAM 条件装备（6000 金、`acquisition=conditional`）胜率高但不是常规出装 | 过滤 `isFinal && acq=="shop" && price>=2000`，并优先用本英雄自己的装备样本 |
-| 已买的散件仍显示「未买」、下一件还是散件 | 只把 `isFinal` 装备算「已有」 | 进度按实际购买 id 判断；「计划外」才只算成品 |
+| 已买的散件仍显示「未买」、下一件还是散件 | 只把 `isFinal` 装备算「已有」 | 进度按实际购买 id 判断；「计划外」只算非鞋子成品 |
 | 鞋子被推荐成「不买鞋子」 | 数据里 `id 0`（无鞋）确有 ~60% 胜率与高选取率，不是 bug | 保留该选项，仅把名字显示为「不买鞋子」 |
 | 页面越用越吃 CPU | 每 1.2s 轮询都重新 `json.loads` 排行榜与 1.6MB 英雄详情 | `fetch_json` 加进程内 TTL memo（已解析对象直接复用） |
 | 窄浮窗里装备名被拆成两行 | `.it` 默认按字符换行 | `.it{white-space:nowrap}`，靠 `.its` 整块换行 |
 | 三海克斯组合查不到胜率 | 数据只有 `augmentCombinations` 的成对样本 | 只对「已选 1 个 + 本张卡」做组合加成，3 个以上不臆造 |
+| 浮窗把浏览器里的「搜索」当成商店打开 | 截屏抓到的是前台浏览器，不是游戏 | `window.is_game_foreground()`：前台不是 `RiotWindowClass` / 标题不像 LoL 时，OCR 与智能折叠全部跳过 |
+| 点浮窗时面板莫名收起 | 浮窗成了前台窗口，智能判定以为「离开了游戏」 | 非游戏前台时智能状态冻结，不改窗口、不改 token |
+| LCU 抖动导致刚弹出就被收成胶囊 | phase 瞬间 `None` 被当成离开对局 | 仅在 `autoCloseOverlay` 且 `None` 持续 >15s 才清识别状态并关窗 |
 
 ---
 
@@ -244,12 +261,14 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 2. **全屏独占 / 全屏优化**可能仍压住浮窗。高频置顶已加；若仍无效，把 LoL 视频设置改「窗口化」，或对 `League of Legends.exe` 禁用「全屏优化」。
 3. **OCR 依赖 Windows 中文识别器**（`ocr.ps1` 优先选 `zh*`），识别不准可在控制台微调 `region` 后点「立即识别」验证；也可用「手动添加海克斯」兜底。
 4. 大厅/主页面按设计**不弹浮窗**，仅 `ChampSelect` / `InProgress` 等阶段自动弹。
+5. **商店状态没有官方接口**：LCU 与 Live Client Data 都不暴露「商店是否打开」，只能屏幕 OCR 关键词（商店/推荐装备/全部装备/已购/购买/出售/搜索）。区域或分辨率差异导致识别不到时，在控制台调 `shopRegion` 后点「商店识别测试」；识别不到只会表现为「不自动展开」，不影响其它功能。
 5. Edge 冷启动偶发找不到窗口句柄（等待已放宽到 25s，失败会清理半开进程），再点一次「展开」或重新双击启动器即可。
 6. 评级与出装评分是**加权排序**，不改变原始胜率；样本量小的组合会降权，但不代表因果。
 7. `schtasks.exe` 在本环境被安全策略禁用，未使用计划任务方案；开机自启走 Startup 文件夹。
 8. **敌方阵容是启发式画像**：靠英雄职责 + 已买装备类别推断物理/法系/坦克/回复，敌方装备还没成型时会偏；由此产生的加分与「针对性备选」属经验建议，不是胜率因果（平均胜率偏低也正常）。
 9. **组合加成只有成对样本**（`augmentCombinations`），已选 2 个以上海克斯时只能取「本张卡 + 其中 1 个」的最高组合，不做三件以上的臆造。
 10. **阶段默认按「已选数量 + 1」推断**：OCR 漏识别或手动加错会让阶段偏移，控制台可手动指定 1~4。
+11. **智能展开依赖屏幕识别**：识别间隔 2s，关闭商店后最多约 6s 才收回胶囊；海克斯卡面消失后最多约 10s 收回。属有意留的宽限，避免翻页/动画时反复伸缩。
 
 ---
 
@@ -268,10 +287,31 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 组合加成：卢锡安已选珠光手镯时，珠光护手组合胜率 67.0%（+14.3pp，11,046 场）→ 协同加分封顶 +12，总分 100 / S。
 - 敌方画像：5 人物理偏多 → 「物理 4 · 法系 1 · 坦克 1 · 回复 1 · 堆护甲 1」，针对性备选给出兰顿之兆 / 千变者贾修 / 中娅沙漏（均为该英雄实际出过的护甲成品，样本 1,511~9,697）。
 - 实时核对：已买长剑+狂战士胫甲+收集者 → 进度 2/8、下一件十字镐（875 金币）、计划外「狂战士胫甲」。
-- 分件替换：第 1 件路线收集者 59.4% → 巨蛇之牙 61.6%（+2.2pp，1,884 场）。
 - 性能：`build()` 平均 3.9ms（含敌方画像与克制备选），`state()` 平均 0.2ms、JSON 26.5KB；加 memo 前每次轮询要重复解析 1.6MB 详情。
 - 界面：330px 宽（=400 物理像素 @125%）下无横向溢出；标签、说明、协同、下一件、敌方 chips、步骤勾选、克制备选全部在卡片内。控制台阶段选择器 5 个按钮完整。
 - 语法：Python 全量 `py_compile`、页面 JS `node --check`、无头浏览器渲染均通过。
+
+**2026-11-10 第三轮（智能展开：只在海克斯/商店时弹出）**
+- 需求确认：非决策时刻收小胶囊；英雄选择阶段保留自动弹出。
+- 接口复核：LCU / Live Client Data 均不提供商店开关状态 → 商店识别走屏幕 OCR 关键词（商店 / 推荐装备 / 全部装备 / 已购 / 购买 / 出售 / 搜索）。
+- 防误判：OCR 与智能折叠只在 `is_game_foreground()` 为真时执行；实测曾截到 Bilibili 全屏页面，加守卫后不再误判。
+- 状态机：`bench` / `offer:<ids>` / `shop:<epoch>` 三态 token，只在变化时改窗口尺寸；`shop_epoch` 区分同一局多次开商店；用户手动折叠优先；`ocrEnabled` 关闭时仍保留商店识别。
+- 语法：`py_compile app.py vision.py window.py` 通过。
+- 页面：本地静态服务 + 无头浏览器验证 — console 仅 3 条预期 `/api` 404、无 JS 错误；智能开关「已开启」、商店状态「未检测到商店」、`shopRegion` 回填 `[0,0.02,0.72,0.18]`、备选席 5 行、海克斯 3 张卡。
+- 待办：默认 `shopRegion` 需在真实商店打开时用控制台「商店识别测试」复核（不识别只影响自动展开，不影响其它功能）。
+
+**2026-11-10 第四轮（出装区简化）**
+- 按用户反馈移除「查看分件备选」（路线→替换 + pp/样本的写法看不懂）与「写入游戏内配装方案」（无用）。
+- 改为在「下一件」下方固定显示「第 N 件 · 胜率最高的 3 个」：按下一件所在分件位置取 `slotRanking`，按原始胜率排序，过滤样本 < 800 的极值；出门装/鞋子阶段退回第 1 件排行。
+- 后端同步删除 `itemset` 动作、`push_itemset()`、`league.push_item_set()` / `current_summoner()` 与 engine 的 `slotAdvice`。
+- 语法 `py_compile` 通过；无头浏览器渲染验证 pickBox 三条、旧按钮消失、无 JS 错误。
+
+**2026-11-10 第五轮（出装序贯推荐）**
+- 用户反馈：出装是序贯决策，推荐要基于已经买到的装备继续往下给，而不是照抄计划顺序。
+- 引擎新增 `build.picks`：按实际已出的成品数（含成装鞋）定位「第 N 件」，不再依赖计划里的 `next.slot`；排除已买装备、样本 <800 的极值、非商店成品（如金铲铲），已有鞋子时不再推第二双鞋；候选池内部保留每件位前 12 个，过滤后仍尽量凑满 3 个。
+- 用真实购买路线给候选打 `route` 标记：已出成品在路线里出现时，取它之后紧接着的下一件；仅作「同路线」提示，不改原始胜率排序。页面只在部分候选带标记时显示该标签，三项都同路线时不重复刷屏。
+- 「下一件」改为显示 `picks` 第一名；计划外提示不再把成装鞋算作计划外（鞋子本来就可能偏离三件套路线）。
+- 验证：卢锡安 + 珠光手镯，已出狂战士胫甲 + 收集者 → `第 3 件`，公理圆弧 61.3% / 无尽 59.0% / 多米尼克 57.8%；空装备 → 第 1 件；已出 4 件成品 → 第 5 件；6 件成品 → 「六件装备已出齐」。400px 浮窗宽度无横向溢出，console 仅预期 `/api` 404。
 
 
 ---
@@ -289,19 +329,21 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | 「第 N 次」不对 | 控制台「海克斯阶段」改成手动 1~4；漏选/多选海克斯会带偏自动推断 |
 | 敌方阵容不显示 | 只有对局内（Live Client Data）才有；选人阶段为空是正常的 |
 | 「下一件」不准 | 读 Live 接口有 2~3 秒延迟；散件/回城前购买会短暂对不上，重新轮询即恢复 |
+| 「下一件」和步骤里的第 N 件不一样 | 「下一件」按实际已出成品数 + 当前这一件位的胜率算；步骤是路线参考，买了计划外装备时两者会分开 |
+| 打开商店面板不自动展开 | 控制台看「商店识别」是否命中；没命中就调 `shopRegion` 后点「商店识别测试」；确认游戏在前台、「智能模式」开启 |
+| 离开商店面板不收 | 看 `decision` 是否为 `shop`；识别 2s 一次 + 4.5s 宽限，最多约 6s 才收回；持续不收说明其它文字命中了关键词，看 `shopText` |
 
 ---
 
 ## 14. 后续可做
 
 已完成（原待办）：
-- ✅ 用「第 N 件」slot 数据做分件替换建议 → `build.slotAdvice`，在出装区显示「路线 X → 可换 Y（+Npp，样本）」
+- ✅ 出装区改为按实际已出成品数推进的「下一件 + 胜率前三」→ `build.picks`，排除已买/重复鞋子，真实路线仅作「同路线」提示（原 `slotAdvice` 的路线→替换写法过于绕，已移除）
 - ✅ 敌方阵容（AD/AP/坦度）参与出装评分 → `enemy_profile()` + `_enemy_bonus()`，并给克制备选
 - ✅ 多海克斯组合加成接入评级 → `augmentCombinations` 成对样本，协同分单独可解释
 
 还可以继续：
 - **OCR 多帧投票**：同一轮卡牌连续识别 2~3 次取交集，减少抖动与误识别（目前靠 25s 保持窗口）
-- **一键替换分件**：把 `slotAdvice` 做成按钮，直接改写本次推荐顺序或写入配装方案
 - **敌方出装时序**：现在只看「已买什么」，可再加「谁最肥（等级/装备数）」，给集火与出装优先级
 - **多海克斯（3 个以上）组合**：数据没有三件样本，只能做启发式（同构筑方向加权），需要明确标注「经验」
 - **战绩/熟练度**：LCU 可读近期对局，可给「你玩这个英雄的胜率」与版本胜率做对照（涉及隐私，需用户明确同意）

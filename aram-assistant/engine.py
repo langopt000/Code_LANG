@@ -359,6 +359,33 @@ class Engine:
             + min(3.0, math.log10(sample) * float(prof.get("pickRate", 0) or 0) * 2)
         )
 
+    def _route_support(self, candidates, owned_ids, max_profiles=6):
+        """真实购买路线里，已出成品之后紧接着买的是什么。
+
+        只用来给候选件标「同路线」，不改变原始胜率排序。
+        """
+        support = set()
+        seen = set()
+        for _, _, prof, _ in (candidates or [])[:max_profiles]:
+            if id(prof) in seen:
+                continue
+            seen.add(id(prof))
+            for route in (prof.get("routes") or [])[:2]:
+                seq = [str(r.get("id")) for r in (route.get("purchaseOrder") or [])]
+                seq += [str((r.get("item") or {}).get("id")) for r in (route.get("laterItems") or [])]
+                seq = [
+                    i for i in seq
+                    if (self.items.get(i) or {}).get("final") and (self.items.get(i) or {}).get("acq") == "shop"
+                ]
+                pos = [i for i, iid in enumerate(seq) if iid in owned_ids]
+                if not pos:
+                    continue
+                for iid in seq[max(pos) + 1:]:
+                    if iid not in owned_ids:
+                        support.add(iid)
+                        break
+        return support
+
     def _counters(self, cid, profile, exclude_ids, limit=3):
         """按敌方阵容挑针对性备选：优先用「本英雄实际出过这件」的样本。"""
         if not profile:
@@ -504,6 +531,7 @@ class Engine:
                     acc["n"] += float(r.get("sampleCount", 0) or 0) * weight
 
         slot_ranking = {}
+        slot_pool = {}  # 内部保留更大候选池，供「按当前装备」推荐过滤后仍有 3 个
         for slot, acc in slot_rows.items():
             ranked = []
             for iid, a in acc.items():
@@ -521,7 +549,8 @@ class Engine:
                 item["why"] = why
                 ranked.append((item_value(item, wr, sample, pick), item))
             ranked.sort(key=lambda t: -t[0])
-            slot_ranking[slot] = [x[1] for x in ranked[:4]]
+            slot_pool[slot] = [x[1] for x in ranked[:12]]
+            slot_ranking[slot] = slot_pool[slot][:4]
 
         # 3) 组装顺序步骤
         steps = []
@@ -579,39 +608,7 @@ class Engine:
                 }
             )
 
-        # 4) 分件替换建议：当前路线那一件不是本件最优时给出替换
-        slot_advice = []
-        for step in steps:
-            if not step["slot"].startswith("第 "):
-                continue
-            idx = step["slot"].split()[1]
-            ranked = slot_ranking.get(idx) or []
-            if not ranked:
-                continue
-            cur = step["items"][0]
-            pool = [x for x in ranked if (x.get("sampleCount") or 0) >= 1500] or ranked
-            best = max(pool, key=lambda x: float(x.get("winRate") or 0))
-            if best["id"] == cur["id"]:
-                continue
-            cur_stat = next((x for x in ranked if x["id"] == cur["id"]), None)
-            cur_wr = (cur_stat or {}).get("winRate")
-            if cur_wr is None:
-                cur_wr = step.get("winRate")
-            if cur_wr is None:
-                continue
-            gain = round((best.get("winRate") or 0) - cur_wr, 1)
-            if gain >= 1.5:
-                slot_advice.append(
-                    {
-                        "slot": step["slot"],
-                        "current": cur,
-                        "best": best,
-                        "gain": gain,
-                        "why": best.get("why") or [],
-                    }
-                )
-
-        # 5) 顺序列表 + 实时核对当前装备
+        # 4) 顺序列表 + 实时核对当前装备
         order = []
         seen = set()
         for s in steps:
@@ -638,11 +635,44 @@ class Engine:
             o["owned"] = o["id"] in bought_ids
         next_item = next((o for o in order if not o["owned"]), None)
         off_plan = [
-            i for i in owned if i.get("final") and i["id"] not in order_ids
+            i for i in owned
+            if i.get("final") and "Boots" not in (i.get("cats") or []) and i["id"] not in order_ids
         ][:4]
         done = sum(1 for o in order if o["owned"])
 
         counters = self._counters(cid, profile, order_ids | bought_ids, limit=3)
+
+        # 5) 序贯推荐：按实际已出的成品数定位「下一件」，排除已买 / 重复鞋子，再按胜率取前三
+        owned_final = [
+            i for i in owned
+            if i.get("final") and i.get("acq") == "shop" and (i.get("price") or 0) >= 900
+        ]
+        owned_final_ids = {i["id"] for i in owned_final}
+        owns_boots = any("Boots" in (i.get("cats") or []) for i in owned)
+        picks = {"slot": 0, "label": "", "rows": [], "ownedCount": len(owned_final), "full": False}
+        if len(owned_final) >= 6:
+            picks["full"] = True
+        else:
+            slot_no = len(owned_final) + 1
+            support = self._route_support(candidates, owned_final_ids)
+            rows = []
+            for item in slot_pool.get(str(slot_no), []):
+                iid = item.get("id")
+                if iid in bought_ids or iid == "0":
+                    continue
+                if (item.get("sampleCount") or 0) < 800:
+                    continue
+                if not item.get("final") or item.get("acq") != "shop":
+                    continue
+                if owns_boots and "Boots" in (item.get("cats") or []):
+                    continue
+                row = dict(item)
+                row["route"] = iid in support
+                rows.append(row)
+            rows.sort(key=lambda x: -(x.get("winRate") or 0))
+            picks["slot"] = slot_no
+            picks["label"] = "第 %d 件" % slot_no
+            picks["rows"] = rows[:3]
 
         # 6) 说明
         notes = [
@@ -669,13 +699,13 @@ class Engine:
             "steps": steps,
             "order": order,
             "slotRanking": slot_ranking,
-            "slotAdvice": slot_advice,
             "counters": counters,
             "profile": profile,
             "owned": owned,
             "offPlan": off_plan,
             "progress": {"done": done, "total": len(order)},
             "next": next_item,
+            "picks": picks,
             "notes": notes,
         }
 

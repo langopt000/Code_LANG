@@ -175,30 +175,63 @@ def normalize(s):
     return _PUNCT.sub("", s).lower()
 
 
-def match_augments(text, augment_index, limit=3, min_score=0.52):
-    """把 OCR 文本模糊匹配到海克斯名称，返回按置信度排序的候选。"""
-    flat = normalize(text)
+def match_augments(text, augment_index, limit=3, min_score=0.65):
+    """把 OCR 文本模糊匹配到海克斯名称，返回按置信度排序的候选。
+
+    精度约束（针对实测误报）：
+    - 最长名称优先：「终极循环往复」不能被短名「循环往复」抢走（短名是长名子串时压制）。
+    - 只在「像卡牌名」的短行上匹配：城邦贴纸/标语/描述等长行一律不参与，避免把贴纸认成海克斯。
+    - 模糊匹配提高门槛（覆盖率与相似度双下限），整段仅用于名称完整出现的精确命中。
+    """
+    raw_text = str(text or "")
+    flat = normalize(raw_text)
     if len(flat) < 2:
         return []
+    lines = [normalize(l) for l in raw_text.splitlines()]
+    lines = [l for l in lines if l]
+    all_names = set()
+    for a in augment_index:
+        for raw in [a.get("name", "")] + list(a.get("aliases") or []):
+            n = normalize(raw)
+            if len(n) >= 2:
+                all_names.add(n)
+
+    def shadowed(nm, hay):
+        # 存在另一个更长、且同样出现在 hay 里的名称包含 nm → nm 是它的子串，应让位
+        return any(n2 != nm and len(n2) > len(nm) and nm in n2 and n2 in hay for n2 in all_names)
+
     scored = []
     for a in augment_index:
-        names = [a.get("name", "")] + list(a.get("aliases") or [])
         best = 0.0
-        for raw in names:
+        for raw in [a.get("name", "")] + list(a.get("aliases") or []):
             name = normalize(raw)
             if len(name) < 2:
                 continue
-            if name in flat:
-                s = 1.0
-            else:
-                # OCR 常出现漏字/错字，先用二元组覆盖率初筛，再做序列相似度
-                grams = [name[i:i + 2] for i in range(len(name) - 1)] or [name]
-                hits = sum(1 for g in grams if g in flat)
-                cover = hits / len(grams)
-                if cover < 0.30:
-                    continue
-                s = 0.45 * cover + 0.55 * difflib.SequenceMatcher(None, name, flat).ratio()
-            best = max(best, s)
+            if name in flat and not shadowed(name, flat):
+                best = 1.0
+                continue
+            for ln in lines:
+                if len(ln) > 12:
+                    continue  # 卡牌名很短；长行是描述/标语/贴纸文案
+                if name == ln:
+                    s = 1.0
+                elif name in ln:
+                    if shadowed(name, ln):
+                        continue
+                    s = 0.95 if len(ln) <= len(name) + 3 else 0.5
+                else:
+                    if len(ln) > len(name) * 3:
+                        continue
+                    grams = [name[i:i + 2] for i in range(len(name) - 1)] or [name]
+                    cover = sum(1 for g in grams if g in ln) / len(grams)
+                    if cover < 0.5:
+                        continue
+                    ratio = difflib.SequenceMatcher(None, name, ln).ratio()
+                    if ratio < 0.5:
+                        continue
+                    s = 0.45 * cover + 0.55 * ratio
+                if s > best:
+                    best = s
         if best >= min_score:
             scored.append((best, a))
     scored.sort(key=lambda t: -t[0])
@@ -215,11 +248,11 @@ def match_augments(text, augment_index, limit=3, min_score=0.52):
     return out
 
 
-def detect(region, augment_index, keep_png=False):
+def detect(region, augment_index, keep_png=False, out_png=None):
     """region: 屏幕比例 (x, y, w, h)，各为 0~1。返回 (candidates, text, error)。"""
     sw, sh = screen_size()
     x, y, w, h = region
-    tmp = Path(tempfile.gettempdir()) / "aram_assistant_capture.png"
+    tmp = Path(out_png) if out_png else (Path(tempfile.gettempdir()) / "aram_assistant_capture.png")
     try:
         grab_region(x * sw, y * sh, w * sw, h * sh, tmp)
         text, err = run_ocr(tmp)
@@ -229,7 +262,48 @@ def detect(region, augment_index, keep_png=False):
     except Exception as exc:
         return [], "", "截屏失败: %s" % str(exc)[:120]
     finally:
-        if not keep_png and tmp.exists():
+        if not keep_png and not out_png and tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+
+# 商店界面才有的文字：标签页 / 搜索框 / 购买按钮。刻意不收录「装备」等
+# 通用词，避免把浮窗自己的「出装与顺序」或对局内其它文字误判成商店。
+SHOP_HINTS = (
+    "商店", "推荐装备", "全部装备", "已购装备", "已购买", "已购", "购买", "出售", "搜索",
+    "shop", "recommended", "all items", "owned", "purchase", "sell", "search",
+)
+
+
+def shop_hit(text):
+    """返回命中的关键词，没有命中返回空串。"""
+    flat = normalize(text)
+    if len(flat) < 2:
+        return ""
+    for hint in SHOP_HINTS:
+        h = normalize(hint)
+        if h and h in flat:
+            return hint
+    return ""
+
+
+def detect_shop(region, keep_png=False, out_png=None):
+    """识别商店是否打开。返回 (hit, text, error)，hit 非空即视为打开。"""
+    sw, sh = screen_size()
+    x, y, w, h = region
+    tmp = Path(out_png) if out_png else (Path(tempfile.gettempdir()) / "aram_assistant_shop.png")
+    try:
+        grab_region(x * sw, y * sh, w * sw, h * sh, tmp)
+        text, err = run_ocr(tmp)
+        if err:
+            return "", "", err
+        return shop_hit(text), text, ""
+    except Exception as exc:
+        return "", "", "截屏失败: %s" % str(exc)[:120]
+    finally:
+        if not keep_png and not out_png and tmp.exists():
             try:
                 tmp.unlink()
             except Exception:
