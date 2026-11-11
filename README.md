@@ -13,7 +13,7 @@
 
 ## 下载与使用
 
-- **免安装版（推荐）**：到 [Releases](https://github.com/langopt000/Code_LANG/releases/tag/v1.0.0) 下载 `ARAM-Assistant-portable.zip`，解压到任意目录双击「启动助手.bat」即可，不用装 Python 或任何依赖（仅 Windows 10/11 64 位）。退出双击「退出助手.bat」，详见包内「使用说明.txt」。
+- **免安装版（推荐）**：到 [Releases](https://github.com/langopt000/aram-assistant/releases/tag/v1.0.0) 下载 `ARAM-Assistant-portable.zip`，解压到任意目录双击「启动助手.bat」即可，不用装 Python 或任何依赖（仅 Windows 10/11 64 位）。退出双击「退出助手.bat」，详见包内「使用说明.txt」。
 - **源码运行**：见 [aram-assistant/](aram-assistant/)，纯 Python 3 标准库、零第三方依赖，界面是单文件 HTML。
 
 ## 原理与隐私

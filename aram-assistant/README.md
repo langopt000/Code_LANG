@@ -24,7 +24,7 @@ start.bat
 
 ## 发给别人用（免安装版）
 
-下载：[Releases v1.0.0 · ARAM-Assistant-portable.zip](https://github.com/langopt000/Code_LANG/releases/download/v1.0.0/ARAM-Assistant-portable.zip)。解压到任意位置，双击「启动助手.bat」即可，不用装 Python 或任何依赖（包内自带嵌入式 Python 3.11，仅 Windows 10/11 64 位）。退出双击「退出助手.bat」，报错排查用「诊断启动.bat」，详见包内「使用说明.txt」。
+下载：[Releases v1.0.0 · ARAM-Assistant-portable.zip](https://github.com/langopt000/aram-assistant/releases/download/v1.0.0/ARAM-Assistant-portable.zip)。解压到任意位置，双击「启动助手.bat」即可，不用装 Python 或任何依赖（包内自带嵌入式 Python 3.11，仅 Windows 10/11 64 位）。退出双击「退出助手.bat」，报错排查用「诊断启动.bat」，详见包内「使用说明.txt」。
 
 本地重新打包产物在 `dist/ARAM助手-免安装版.zip`（不进仓库）：下载 [python-3.11.9-embed-amd64.zip](https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip) 解压到 `dist/ARAM助手/runtime/`，在 `python311._pth` 末尾加一行 `..`，拷入源码与 `ui/`、`ocr.ps1`，补上三个 bat、`stop.py`、使用说明，压成 zip（保留顶层文件夹）。
 
