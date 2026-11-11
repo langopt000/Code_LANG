@@ -4,3 +4,6 @@ data/hl_*/
 data/*.log
 data/watcher.stop
 data/*.tmp
+
+# 发行包构建产物
+dist/

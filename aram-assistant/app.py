@@ -28,13 +28,14 @@ if sys.stderr is None:
 from datafeed import AramData  # noqa: E402
 from engine import Engine  # noqa: E402
 from league import LeagueClient  # noqa: E402
-from vision import detect as ocr_detect, detect_shop  # noqa: E402
+from vision import detect as ocr_detect, detect_shop, detect_chat, parse_chat_picks, normalize  # noqa: E402
 from window import OverlayWindow, COLLAPSED_W, COLLAPSED_H, is_game_foreground  # noqa: E402
 
 PORT = 8765
 CONFIG_FILE = ROOT / "data" / "config.json"
 UI_DIR = ROOT / "ui"
 UI_FILE = UI_DIR / "index.html"
+SERVER = None
 
 
 def ui_ver():
@@ -43,6 +44,14 @@ def ui_ver():
         return str(int(UI_FILE.stat().st_mtime))
     except Exception:
         return "0"
+
+
+def offer_from(cands):
+    """同一帧命中 2~3 个不同海克斯、且每个都是短行近精确匹配（>=0.9）才算三选一。
+    真实卡面是 3 张大字卡；计分板/聊天里的名字要么只有一个、要么一大片，
+    模糊高分也不采纳，避免把已选海克斯展示误判成新的三选一。"""
+    strong = [c for c in cands if (c.get("ocrScore") or 0) >= 0.9]
+    return strong[:3] if 2 <= len(strong) <= 3 else []
 
 DEFAULT_CONFIG = {
     "dataset": "high",
@@ -60,6 +69,9 @@ DEFAULT_CONFIG = {
     "shopInterval": 2.0,        # 商店状态识别间隔（秒）
     "shopGrace": 4.5,           # 商店关闭后保持展开的宽限，避免识别抖动
     "offerGrace": 10.0,         # 海克斯卡面消失后保持展开的宽限
+    "autoRecord": True,         # 聊天广播「已选择了X」自动记入已选海克斯
+    "chatRegion": [0.0, 0.55, 0.32, 0.22],  # 左下聊天区（屏幕比例）
+    "chatInterval": 3.0,        # 聊天识别间隔（秒）
     "overlayPosition": "right",  # right / left / center
     "overlayWidth": 400,
     "overlayHeight": 820,
@@ -102,7 +114,10 @@ class Assistant:
         self.champ_select = None
         self.detected_champion = ""
         self.manual_champion = ""
+        self.archetype_override = ""   # 手动指定的出装流派 key，空=自动
         self.selected = []           # 已选海克斯 id
+        self.selected_source = {}    # id -> auto / manual，浮窗标来源
+        self._chat_done = set()      # 已处理过的聊天广播行，手动删除后不会被旧广播加回
         self.stage_override = 0      # 0 = 自动（按已选数量推断第几次海克斯）
         self.candidates = []         # OCR 识别到的三选一
         self.ocr_text = ""
@@ -118,6 +133,9 @@ class Assistant:
         self.last_shop_seen = 0
         self.last_shop_ocr = 0
         self._shop_miss = 0
+        self.chat_text = ""
+        self.chat_error = ""
+        self.last_chat_ocr = 0
         self._smart_token = None     # 当前决策标识（海克斯卡面 / 第几次商店），变了才动窗口
         self._smart_collapse = None  # 智能模式下的临时折叠态；None 表示跟随用户配置
         self.build_cache = {}
@@ -283,6 +301,8 @@ class Assistant:
             self.detected_champion = cid
             with self.lock:
                 self.selected = []
+                self.selected_source = {}
+                self._chat_done = set()
                 self.candidates = []
                 self.build_cache_key = None
             self.log("识别到英雄：%s" % self.champion_name())
@@ -311,7 +331,8 @@ class Assistant:
                     continue
                 aug_on = bool(self.cfg.get("ocrEnabled", True))
                 smart_on = bool(self.cfg.get("smartShow", True))
-                if not aug_on and not smart_on:
+                chat_on = bool(self.cfg.get("autoRecord", True))
+                if not aug_on and not smart_on and not chat_on:
                     continue
                 if self.phase not in ("InProgress", "GameStart", "Reconnect"):
                     continue
@@ -320,7 +341,8 @@ class Assistant:
                 now = time.time()
                 aug_due = aug_on and now - self.last_ocr >= float(self.cfg.get("ocrInterval", 3.5))
                 shop_due = smart_on and now - self.last_shop_ocr >= float(self.cfg.get("shopInterval", 2.0))
-                if not aug_due and not shop_due:
+                chat_due = chat_on and now - self.last_chat_ocr >= float(self.cfg.get("chatInterval", 3.0))
+                if not aug_due and not shop_due and not chat_due:
                     continue
                 self.ocr_busy = True
                 try:
@@ -328,6 +350,8 @@ class Assistant:
                         self._run_augment_ocr()
                     if shop_due:
                         self._run_shop_ocr()
+                    if chat_due:
+                        self._run_chat_ocr()
                 finally:
                     self.ocr_busy = False
                 self._apply_smart_visibility()
@@ -344,16 +368,17 @@ class Assistant:
             self.cfg.get("region", DEFAULT_CONFIG["region"]),
             self.engine.augments,
         )
+        offer = offer_from(cands)
         with self.lock:
             self.ocr_text = text[:500] if text else ""
             self.ocr_error = err
-            if cands:
-                self.candidates = cands
+            if offer:
+                self.candidates = offer
                 self.last_card_seen = time.time()
             elif time.time() - self.last_card_seen > 25:
                 self.candidates = []
-        if cands:
-            self.log("识别到海克斯：%s" % " / ".join(x["name"] for x in cands[:3]))
+        if offer:
+            self.log("识别到海克斯：%s" % " / ".join(x["name"] for x in offer))
 
     def _run_shop_ocr(self):
         if not is_game_foreground():
@@ -381,6 +406,42 @@ class Assistant:
             self.log("检测到商店已打开（命中「%s」）" % hit)
         elif was_open and not self.shop_open:
             self.log("商店已关闭")
+
+    def _run_chat_ocr(self, out_png=None):
+        """读聊天里的「已选择了X」广播，把本人的选取自动记入已选。返回 (picks, text, err)。"""
+        if not is_game_foreground():
+            return [], "", "游戏窗口不在前台"
+        self.last_chat_ocr = time.time()
+        text, err = detect_chat(
+            self.cfg.get("chatRegion", DEFAULT_CONFIG["chatRegion"]), out_png=out_png
+        )
+        with self.lock:
+            self.chat_text = text[:400] if text else ""
+            self.chat_error = err
+        if err or not text or not self.engine:
+            return [], text, err
+        me = (self.live or {}).get("me") or {}
+        who = [me.get("summonerName", "")]
+        card = self.engine.champion_card(self.champion_id())
+        if card:
+            who += [card.get("name", ""), card.get("title", "")]
+        picks = parse_chat_picks(text, self.engine.augments, who)
+        added = []
+        with self.lock:
+            for p in picks:
+                key = normalize(p["line"])
+                if key in self._chat_done:
+                    continue
+                self._chat_done.add(key)
+                if p["id"] not in self.selected:
+                    self.selected.append(p["id"])
+                    self.selected_source[p["id"]] = "auto"
+                    added.append(p["name"])
+            if added:
+                self.build_cache_key = None
+        for name in added:
+            self.log("自动记录已选海克斯：%s（聊天广播）" % name)
+        return picks, text, err
 
     def _effective_collapsed(self):
         if self._smart_collapse is not None:
@@ -442,15 +503,16 @@ class Assistant:
             cands, text, err = ocr_detect(
                 self.cfg.get("region", DEFAULT_CONFIG["region"]), self.engine.augments, keep_png=True
             )
+            offer = offer_from(cands)
             with self.lock:
                 self.ocr_text = text[:500] if text else ""
                 self.ocr_error = err
-                if cands:
-                    self.candidates = cands
+                if offer:
+                    self.candidates = offer
                     self.last_card_seen = time.time()
-            if cands:
-                self.log("手动识别：%s" % " / ".join(x["name"] for x in cands[:3]))
-            return {"ok": True, "candidates": cands, "text": text, "error": err}
+            if offer:
+                self.log("手动识别：%s" % " / ".join(x["name"] for x in offer))
+            return {"ok": True, "candidates": cands, "accepted": offer, "text": text, "error": err}
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:160]}
         finally:
@@ -466,11 +528,11 @@ class Assistant:
         enemy_sig = tuple(
             (p.get("championName", ""), tuple(p.get("items") or [])) for p in (live.get("enemies") or [])
         )
-        key = (cid, tuple(self.selected), self.data.dataset, self.data.version, self.current_stage(), my_items, enemy_sig)
+        key = (cid, tuple(self.selected), self.data.dataset, self.data.version, self.current_stage(), my_items, enemy_sig, self.archetype_override)
         if key != self.build_cache_key:
             try:
                 enemies = live.get("enemies") or []
-                self.build = self.engine.build(cid, self.selected, enemies, my_items)
+                self.build = self.engine.build(cid, self.selected, enemies, my_items, archetype=self.archetype_override)
                 self.build_cache_key = key
             except Exception as exc:
                 self.build = {"steps": [], "order": [], "notes": ["出装计算失败：%s" % str(exc)[:100]], "source": ""}
@@ -487,6 +549,7 @@ class Assistant:
             cards = []
             build = dict(self.build) if self.build else {}
             selected = list(self.selected)
+            selected_source = dict(self.selected_source)
             candidates = list(self.candidates)
             phase = self.phase
             logs = list(self.logs[-12:])
@@ -516,6 +579,7 @@ class Assistant:
             "candidates": [],
             "selectedAugments": [],
             "build": build,
+            "archetypeOverride": self.archetype_override,
             "ocrText": ocr_text,
             "ocrError": ocr_error,
             "ocrEnabled": bool(self.cfg.get("ocrEnabled", True)),
@@ -536,6 +600,10 @@ class Assistant:
             "shopText": self.shop_text,
             "shopError": self.shop_error,
             "shopRegion": self.cfg.get("shopRegion", DEFAULT_CONFIG["shopRegion"]),
+            "autoRecord": bool(self.cfg.get("autoRecord", True)),
+            "chatText": self.chat_text,
+            "chatError": self.chat_error,
+            "chatRegion": self.cfg.get("chatRegion", DEFAULT_CONFIG["chatRegion"]),
             "decision": (
                 "bench" if token == "bench" else
                 ("offer" if token.startswith("offer") else ("shop" if token else ""))
@@ -561,7 +629,10 @@ class Assistant:
             | {"ocrScore": a.get("ocrScore", 0)}
             for a in candidates
         ]
-        result["selectedAugments"] = [E.augment_card(a, cid, selected=selected) for a in selected]
+        result["selectedAugments"] = [
+            E.augment_card(a, cid, selected=selected) | {"auto": selected_source.get(str(a)) == "auto"}
+            for a in selected
+        ]
         result["topChampions"] = E.champions[:12]
         result["topAugments"] = E.augments[:12]
         return result
@@ -661,16 +732,35 @@ class Assistant:
             aid = str(value)
             if aid and aid not in self.selected:
                 self.selected.append(aid)
+                self.selected_source[aid] = "manual"
                 self.build_cache_key = None
                 self.log("已选海克斯：%s" % (self.engine.aug_by_id.get(aid, {}).get("name", aid) if self.engine else aid))
         elif action == "removeAugment":
             aid = str(value)
             if aid in self.selected:
                 self.selected.remove(aid)
+                self.selected_source.pop(aid, None)
                 self.build_cache_key = None
         elif action == "clearAugments":
             self.selected = []
+            self.selected_source = {}
             self.build_cache_key = None
+        elif action == "setAutoRecord":
+            self.cfg["autoRecord"] = bool(value)
+            save_config(self.cfg)
+            self.log("自动记录已选海克斯（聊天识别）：%s" % ("开启" if self.cfg["autoRecord"] else "关闭"))
+        elif action == "setChatRegion":
+            if isinstance(value, list) and len(value) == 4:
+                self.cfg["chatRegion"] = [float(v) for v in value]
+                save_config(self.cfg)
+                self.log("已更新聊天识别区域")
+        elif action == "testChat":
+            if not self.ready:
+                return {"ok": False, "error": "数据尚未就绪"}
+            if not is_game_foreground():
+                return {"ok": False, "error": "游戏窗口不在前台：请先切回游戏（聊天里有选取广播时）再点测试"}
+            picks, text, err = self._run_chat_ocr(out_png=str(ROOT / "data" / "_chat_test.png"))
+            return {"ok": True, "picks": picks, "text": text[:500], "error": err}
         elif action == "setDataset":
             if value in ("all", "high"):
                 self.cfg["dataset"] = value
@@ -685,6 +775,11 @@ class Assistant:
                 self.stage_override = 0
             self.build_cache_key = None
             self.log("海克斯阶段：%s" % ("自动（第 %d 次）" % self.current_stage() if not self.stage_override else "第 %d 次" % self.stage_override))
+        elif action == "setArchetype":
+            self.archetype_override = str(value or "")
+            self.build_cache_key = None
+            name = self.engine.data.archetype_name(self.archetype_override) if self.engine and self.archetype_override else ""
+            self.log("出装流派：%s" % (name or self.archetype_override or "自动"))
         elif action == "setOcr":
             self.cfg["ocrEnabled"] = bool(value)
             save_config(self.cfg)
@@ -799,6 +894,10 @@ class Assistant:
             if body.get("fromUser"):
                 self._auto_overlay_disabled = True
             self.log("已关闭浮窗")
+        elif action == "quit":
+            self.overlay.close()
+            self.log("收到退出指令，服务正在关闭")
+            threading.Thread(target=_shutdown_server, daemon=True).start()
         elif action == "refresh":
             self.ready = False
             self.build_cache_key = None
@@ -888,7 +987,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(500, {"ok": False, "error": str(exc)[:200]})
 
 
+def _shutdown_server():
+    if SERVER is not None:
+        SERVER.shutdown()
+
+
 def main():
+    global SERVER
     os.chdir(ROOT)
     url = "http://127.0.0.1:%d/" % PORT
     try:
@@ -899,6 +1004,7 @@ def main():
         if not os.environ.get("ARAM_NO_BROWSER"):
             webbrowser.open(url)
         return
+    SERVER = server
     threading.Thread(target=ASSISTANT.poll_loop, daemon=True).start()
     threading.Thread(target=ASSISTANT.ocr_loop, daemon=True).start()
     threading.Thread(target=ASSISTANT.topmost_loop, daemon=True).start()

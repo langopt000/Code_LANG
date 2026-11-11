@@ -100,7 +100,7 @@ def main():
         except Exception:
             pass
     if not ready:
-        print("服务启动超时，请直接运行 start.bat 查看报错。")
+        print("服务启动超时。首次启动下载数据可能较慢，请稍后再双击一次；仍失败请用诊断模式启动查看报错。")
         return 1
 
     ok = False

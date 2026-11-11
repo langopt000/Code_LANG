@@ -175,13 +175,15 @@ def normalize(s):
     return _PUNCT.sub("", s).lower()
 
 
-def match_augments(text, augment_index, limit=3, min_score=0.65):
+def match_augments(text, augment_index, limit=None, min_score=0.65):
     """把 OCR 文本模糊匹配到海克斯名称，返回按置信度排序的候选。
 
     精度约束（针对实测误报）：
     - 最长名称优先：「终极循环往复」不能被短名「循环往复」抢走（短名是长名子串时压制）。
     - 只在「像卡牌名」的短行上匹配：城邦贴纸/标语/描述等长行一律不参与，避免把贴纸认成海克斯。
-    - 模糊匹配提高门槛（覆盖率与相似度双下限），整段仅用于名称完整出现的精确命中。
+      聊天/计分板里整段出现名字也不算精确命中——精确命中只认短行。
+    - 模糊匹配提高门槛（覆盖率与相似度双下限）。是否构成三选一由调用方按
+      「2~3 个不同海克斯且各自 >=0.9」判定，这里只负责打分。
     """
     raw_text = str(text or "")
     flat = normalize(raw_text)
@@ -206,9 +208,6 @@ def match_augments(text, augment_index, limit=3, min_score=0.65):
         for raw in [a.get("name", "")] + list(a.get("aliases") or []):
             name = normalize(raw)
             if len(name) < 2:
-                continue
-            if name in flat and not shadowed(name, flat):
-                best = 1.0
                 continue
             for ln in lines:
                 if len(ln) > 12:
@@ -243,7 +242,7 @@ def match_augments(text, augment_index, limit=3, min_score=0.65):
         item = dict(a)
         item["ocrScore"] = round(score, 3)
         out.append(item)
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
     return out
 
@@ -269,24 +268,88 @@ def detect(region, augment_index, keep_png=False, out_png=None):
                 pass
 
 
-# 商店界面才有的文字：标签页 / 搜索框 / 购买按钮。刻意不收录「装备」等
-# 通用词，避免把浮窗自己的「出装与顺序」或对局内其它文字误判成商店。
-SHOP_HINTS = (
-    "商店", "推荐装备", "全部装备", "已购装备", "已购买", "已购", "购买", "出售", "搜索",
-    "shop", "recommended", "all items", "owned", "purchase", "sell", "search",
+# 商店面板独有的强信号：命中任一即视为打开。
+SHOP_STRONG = ("商店", "推荐装备", "全部装备", "已购装备", "已购买", "recommended", "all items")
+# 弱信号聊天/死亡回放里也可能出现（实测「搜索」单独命中过），须两个以上同时出现才算。
+# 刻意不收录「装备」等通用词，避免把浮窗自己的「出装与顺序」误判成商店。
+SHOP_HINTS = SHOP_STRONG + (
+    "已购", "购买", "出售", "搜索",
+    "shop", "owned", "purchase", "sell", "search",
 )
 
 
-def shop_hit(text):
-    """返回命中的关键词，没有命中返回空串。"""
+def shop_hits(text):
+    """返回去重后的命中关键词（短词被长词包含时只算长词）。"""
     flat = normalize(text)
     if len(flat) < 2:
+        return []
+    hits = [h for h in SHOP_HINTS if normalize(h) in flat]
+    return [h for h in hits if not any(h != o and normalize(h) in normalize(o) for o in hits)]
+
+
+def shop_hit(text):
+    """商店打开判定：强信号任一，或弱信号 >=2 个。返回命中描述，未打开返回空串。"""
+    hits = shop_hits(text)
+    if not hits:
         return ""
-    for hint in SHOP_HINTS:
-        h = normalize(hint)
-        if h and h in flat:
-            return hint
+    if any(h in SHOP_STRONG for h in hits) or len(hits) >= 2:
+        return "/".join(hits)
     return ""
+
+
+def detect_chat(region, keep_png=False, out_png=None):
+    """识别聊天区文字。返回 (text, error)。"""
+    sw, sh = screen_size()
+    x, y, w, h = region
+    tmp = Path(out_png) if out_png else (Path(tempfile.gettempdir()) / "aram_assistant_chat.png")
+    try:
+        grab_region(x * sw, y * sh, w * sw, h * sh, tmp)
+        return run_ocr(tmp)
+    except Exception as exc:
+        return "", "截屏失败: %s" % str(exc)[:120]
+    finally:
+        if not keep_png and not out_png and tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+
+# 聊天里的选取广播：「04:49 名字 (英雄) 已选择了沃格勒特的巫师帽.」
+CHAT_PICK_RE = re.compile(r"已选择了\s*([^。.!！?？\n]+)")
+
+
+def parse_chat_picks(text, augment_index, who=(), min_score=0.75):
+    """从聊天原文里挑出「who 已选择了X」的广播，按屏幕顺序返回。
+
+    who 为本人召唤师名 / 英雄名 / 称号；聊天会广播所有人的选取，
+    必须归属到本人，空 who 时不记录任何行。
+    """
+    who_n = [normalize(w) for w in who if w]
+    who_n = [w for w in who_n if len(w) >= 2]
+    if not who_n:
+        return []
+    out, seen = [], set()
+    for raw in str(text or "").splitlines():
+        m = CHAT_PICK_RE.search(raw)
+        if not m:
+            continue
+        line_n = normalize(raw)
+        if not any(w in line_n for w in who_n):
+            continue
+        hits = match_augments(m.group(1), augment_index, limit=1, min_score=min_score)
+        if not hits or hits[0]["id"] in seen:
+            continue
+        seen.add(hits[0]["id"])
+        out.append(
+            {
+                "id": hits[0]["id"],
+                "name": hits[0]["name"],
+                "ocrScore": hits[0]["ocrScore"],
+                "line": raw.strip(),
+            }
+        )
+    return out
 
 
 def detect_shop(region, keep_png=False, out_png=None):

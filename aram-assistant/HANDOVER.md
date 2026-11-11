@@ -66,14 +66,14 @@ ARAMKit 公开 JSON (data.aramkit.cn)
         ▲
         │  app.py（HTTP 服务 127.0.0.1:8765 + 后台线程）
         ├── league.py ── LCU (端口由 lockfile/日志发现) + Live Client Data (2999)
-        ├── vision.py ─ GDI 截屏 → Windows.Media.Ocr → 模糊匹配；`detect_shop` 用关键词判断商店是否打开
+        ├── vision.py ─ GDI 截屏 → Windows.Media.Ocr → 模糊匹配；`detect_shop` 用关键词判断商店是否打开；`detect_chat`+`parse_chat_picks` 读聊天「已选择了X」广播自动记录本人已选海克斯
         ├── window.py ─ Edge/Chrome --app 无边框窗 + Win32 置顶/透明/穿透；`is_game_foreground` 前台守卫
         └── watcher.py ─ 检测客户端进程，监管服务
         ▼
    ui/index.html（单页控制台 / 浮窗，轮询 /api/state）
 ```
 
-后台线程：`poll_loop`（1.2s，游戏状态 + 智能展开判定）、`ocr_loop`（0.5s tick；海克斯 3.5s、商店 2.0s 到期才识别）、`topmost_loop`（0.3s，重新置顶）、`watcher` 独立进程（5s）。
+后台线程：`poll_loop`（1.2s，游戏状态 + 智能展开判定）、`ocr_loop`（0.5s tick；海克斯 3.5s、商店 2.0s、聊天 3.0s 到期才识别）、`topmost_loop`（0.3s，重新置顶）、`watcher` 独立进程（5s）。
 
 **智能展开状态机**（`app.py` → `_decision_token` / `_apply_smart_visibility`）：
 - 决策 token：`bench`（英雄选择阶段）、`offer:<三张卡 id>`（卡面 10s 内见过）、`shop:<第几次商店>`（商店 4.5s 内命中过）；空串 = 无决策。
@@ -92,7 +92,7 @@ ARAMKit 公开 JSON (data.aramkit.cn)
 | `datafeed.py` | ARAMKit JSON 客户端：版本发现、缓存、进程内 TTL memo、名称/图标/装备类别与说明文本、索引 |
 | `engine.py` | 海克斯评级（组合/阶段/协同）、敌方阵容画像、出装排序、各件位胜率排行与序贯推荐、实时装备核对、搜索 |
 | `league.py` | LCU 连接（多路径凭据发现）、Live Client Data |
-| `vision.py` | GDI 抓屏、PNG 编码、Windows OCR、`match_augments` 模糊匹配 |
+| `vision.py` | GDI 抓屏、PNG 编码、Windows OCR、`match_augments` 模糊匹配、聊天选取广播解析（`parse_chat_picks`，按召唤师名/英雄名归属本人） |
 | `ocr.ps1` | PowerShell WinRT OCR（优先中文识别器） |
 | `window.py` | 浮窗创建/摆位/折叠/置顶/透明度/点击穿透 |
 | `watcher.py` | 常驻守护、单实例锁(8766)、服务保活、日志 |
@@ -163,6 +163,7 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 对局：`https://127.0.0.1:2999/liveclientdata/allgamedata` → `allPlayers`（英雄名、装备、阵营）
 
 > Riot 的接口**不暴露海克斯卡牌**，这是必须走屏幕 OCR 的原因（商业插件同理）。
+> 但聊天会广播「某某 (英雄) 已选择了XX」——`autoRecord` 据此自动记录本人已选海克斯，无需手动点「选这个」。
 
 ---
 
@@ -196,6 +197,9 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | `shopInterval` | `2.0` | 商店状态识别间隔（秒） |
 | `shopGrace` | `4.5` | 商店看不见后仍算"在商店"的宽限，避免翻页/动画时误收 |
 | `offerGrace` | `10.0` | 海克斯卡面消失后仍算"在选海克斯"的宽限 |
+| `autoRecord` | `true` | 聊天「已选择了X」广播自动记入已选海克斯（只记本人，浮窗标「自动」） |
+| `chatRegion` | `[0,0.55,0.32,0.22]` | 聊天识别区域（屏幕比例，框左下聊天框），控制台可调 |
+| `chatInterval` | `3.0` | 聊天识别间隔（秒） |
 | `overlayPosition` | `right` | `left` / `center` / `right` |
 | `overlayWidth` / `overlayHeight` | `400` / `820` | 展开态物理像素 |
 | `overlayCollapsed` | `true` | 默认收起成小胶囊 |
@@ -217,13 +221,14 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | POST | `/api/ocr` | 立即识别一次 |
 | POST | `/api/refresh` | 重新同步数据 |
 
-`control` 动作：`setChampion`、`clearManual`、`addAugment`、`removeAugment`、`clearAugments`、`setStage`（0=自动，1~4=手动）、`setDataset`、`setOcr`、`setRegion`、`setTheme`、`setOpacity`、`setClickThrough`、`setAutoOverlay`、`setSmartShow`、`setShopRegion`、`testShop`、`setOverlayPosition`、`setCollapsed`、`launchOverlay`、`testOverlay`、`closeOverlay`、`redetect`、`refresh`。
+`control` 动作：`setChampion`、`clearManual`、`addAugment`、`removeAugment`、`clearAugments`、`setStage`（0=自动，1~4=手动）、`setDataset`、`setOcr`、`setRegion`、`setTheme`、`setOpacity`、`setClickThrough`、`setAutoOverlay`、`setSmartShow`、`setShopRegion`、`testShop`、`setAutoRecord`、`setChatRegion`、`testChat`、`setArchetype`（value=流派 key，空串=自动）、`setOverlayPosition`、`setCollapsed`、`launchOverlay`、`testOverlay`、`closeOverlay`、`redetect`、`refresh`、`quit`（关浮窗并干净退出服务，供发行版「退出助手.bat」用）。
 
 `/api/state` 里与新增功能相关的字段：
 - 顶层 `stage` / `stageMode`：当前第几次海克斯、是否手动指定。
 - `smartShow` / `decision`（`bench`/`offer`/`shop`/空）/ `overlayCollapsed`（当前实际折叠态）/ `overlayCollapsedPref`（用户偏好）。
 - `candidates[]`：除原有胜率/评级外，新增 `description`（卡牌原文）、`stageWinRate` / `stageRank` / `stageOk`、`synergyWinRate` / `synergyPartner` / `synergyDelta`、`scoreBase` / `scoreStage` / `scoreSynergy`。
 - 商店识别：`shopOpen`、`shopHit`（命中的关键词）、`shopText`（OCR 原文，调试用）、`shopError`、`shopRegion`。
+- 聊天识别：`autoRecord`（开关）、`chatRegion`、`chatText`（OCR 原文，调试用）、`chatError`；`selectedAugments[].auto` 标记该已选是否来自聊天广播自动记录。
 - `build`：新增 `profile`（敌方画像与建议）、`next` / `owned` / `offPlan` / `progress`（实时装备核对）、`slotRanking`（各分件位置候选）、`picks`（按实际已出成品数推进的下一件前三）、`counters[]`（针对性备选）。`picks` 规则：已出成品数（`final && acq=shop && price>=900`，含成装鞋）决定「第 N 件」；排除已买、样本 <800、非商店成品、已有鞋子时的其它鞋；按原始胜率排序；`route` 标记表示真实购买路线里紧随已出装备的接法，仅作标签、不改排序。
 
 
@@ -269,6 +274,7 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 9. **组合加成只有成对样本**（`augmentCombinations`），已选 2 个以上海克斯时只能取「本张卡 + 其中 1 个」的最高组合，不做三件以上的臆造。
 10. **阶段默认按「已选数量 + 1」推断**：OCR 漏识别或手动加错会让阶段偏移，控制台可手动指定 1~4。
 11. **智能展开依赖屏幕识别**：识别间隔 2s，关闭商店后最多约 6s 才收回胶囊；海克斯卡面消失后最多约 10s 收回。属有意留的宽限，避免翻页/动画时反复伸缩。
+12. **自动记录已选依赖聊天可见**：游戏设置里关掉聊天显示、或广播已淡出时记不到；默认 `chatRegion` 按 1440p 左下聊天框取，其它分辨率微调后用「聊天识别测试」验证。记不到时手动添加兜底，功能不受影响。
 
 ---
 
@@ -313,6 +319,39 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 「下一件」改为显示 `picks` 第一名；计划外提示不再把成装鞋算作计划外（鞋子本来就可能偏离三件套路线）。
 - 验证：卢锡安 + 珠光手镯，已出狂战士胫甲 + 收集者 → `第 3 件`，公理圆弧 61.3% / 无尽 59.0% / 多米尼克 57.8%；空装备 → 第 1 件；已出 4 件成品 → 第 5 件；6 件成品 → 「六件装备已出齐」。400px 浮窗宽度无横向溢出，console 仅预期 `/api` 404。
 
+**2026-11-11 第六轮（免安装发行包）**
+- 需求：发给别人解压即用，不装 Python、不装任何依赖。产物 `dist/ARAM助手-免安装版.zip`（约 10.8 MB，49 个文件，`dist/` 已 gitignore）。
+- 结构：`runtime/` = Windows embeddable Python 3.11.9 amd64（python.org 官方包），`python311._pth` 追加 `..` 把应用根目录挂进 sys.path；其余为源码 + `ui/` + `ocr.ps1` + 三个 bat + `stop.py` + `使用说明.txt`。不含 `data/`（首次运行自建）、不含缓存/预览图/文档。
+- 启动链路：`启动助手.bat` → `runtime\python.exe show_overlay.py`（`sys.executable` 推导 pythonw，守护/服务全部落在 runtime 内）；`退出助手.bat` → `stop.py` 写 `data/watcher.stop` 并 POST `quit`；`诊断启动.bat` → 控制台跑 `app.py` 看报错。
+- 配套代码改动：`app.py` 新增 `quit` 动作（`SERVER` 全局 + `_shutdown_server()` 线程调 `shutdown()`）；`watcher.py` 停止分支改为无条件 POST `quit`（能停掉 show_overlay 直接拉起的服务），自动拉起前复查 `STOP_FLAG` 防退出竞态；`show_overlay.py` 超时提示不再指向 start.bat。
+- 验证：embeddable 解释器 stdlib（ssl/ctypes/http.server 等）+ 全部模块 py_compile + 整体 import 通过；zip 解压回测两次均 ok；`quit` 在 8799 端口独立验证服务干净退出（不碰用户 8765 实例）。
+- 坑：`stop.py` 早期版本模块级直接执行，被 import 时会对 8765 发 quit —— 已加 `__main__` 守卫；测试脚本不要 import 带副作用的入口。bat 用 UTF-8 无 BOM + 首行 `chcp 65001`；zip 内中文文件名靠 Python zipfile 的 UTF-8 标志，Win10/11 资源管理器可正常解压。
+
+**2026-11-11 第七轮（已选海克斯自动记录，修手动依赖）**
+- 发现：真机截图左下聊天有系统广播「04:49 本人 (诺克萨斯统领) 已选择了沃格勒特的巫师帽.」——选取会进聊天，名字是纯文本，可走现有 OCR 管线，无需读内存。
+- `vision.py` 新增 `detect_chat` / `parse_chat_picks`：只认含「已选择了」的行，且行内必须出现本人召唤师名 / 英雄名 / 称号（聊天广播所有人，必须归属）；名称片段走 `match_augments`，门槛 0.75。
+- `app.py`：`ocr_loop` 加 3s 聊天节拍；`_run_chat_ocr` 自动记入 `self.selected` 并标 `auto`；同一广播行只处理一次（`_chat_done`），手动删除后不会被旧广播加回；换英雄清空。新增 `autoRecord` / `chatRegion` / `chatInterval` 配置与 `setAutoRecord` / `setChatRegion` / `testChat` 动作。
+- 单测：精确广播 1.0；OCR 错一字 0.803 仍命中；他人广播 / 击杀消息 / 空归属一律不记；两条广播按屏幕顺序记录。
+- mock 集成：自动记录后 `build` 切专属样本、`stage` 自动推进 2、`selectedAugments[].auto=true`；重复扫描去重、手动删除尊重。
+- 语法 `py_compile` 通过；无头浏览器控制台 / 浮窗两模式无 JS 错误（仅预期 `/api` 404），新开关 / 区域 / 测试按钮 / 「自动」标签渲染正常。
+- 待真机复核：默认 `chatRegion` 需在真实对局用「聊天识别测试」验证（不识别只影响自动记录，手动添加兜底）。
+
+**2026-11-11 第七轮（OCR 误报收紧）**
+- 用户反馈：没有三选一时浮窗也展开显示海克斯。实测日志：对局中反复「识别到海克斯：缩小引擎（1.0）/ 王冠之重（0.771）」→ 自动展开，用户手动收起。来源是计分板/聊天里出现的已选海克斯名字，不是卡面。
+- 旧逻辑两个洞：① 名字在 OCR 整段任意位置出现（`name in flat`）即 1.0，绕过了短行过滤；② 单帧只要 1 个 >=0.65 的命中就采纳并保留 25s，模糊噪声也能撑开浮窗。
+- 修复：`match_augments` 删除整段子串捷径，精确命中只认短行（== 行 1.0 / 行内且行长 <= 名长+3 0.95），返回全部命中（limit 默认 None）；新增 `app.offer_from()`：同一帧 2~3 个不同海克斯且各自 ocrScore>=0.9 才采纳为三选一（真实卡面是 3 张大字卡；计分板一大片 >3 拒、聊天通常 1 个或长句拒、模糊高分不触发）。自动识别与手动识别共用该规则；`/api/ocr` 返回新增 `accepted`，`candidates` 仍给全部命中供校准。
+- 验证：239 个真实海克斯索引，9 用例全过 —— 3 张干净卡 / 带稀有度后缀 / 名字带空格 / 只读到 2 张 → 采纳；1 精确+1 模糊（误报复现）/ 计分板 5 名 / 聊天长句含 2 名 / 对局噪声 → 拒绝；长名压制短名保持。发行 zip 已同步重建。
+- 取舍：极小概率 OCR 只读清 1 张卡时不自动展开（等下一帧或手动添加）；计分板恰好只显示 2~3 个海克斯时仍可能误展开，概率远低于旧逻辑。
+- 商店误报同步收紧：实测聊天文字让「搜索」单独命中就判商店打开（20:45/20:47 两次）。`shop_hit` 改为强信号（商店/推荐装备/全部装备/已购装备/已购买/recommended/all items）任一、或弱信号去重后 >=2 才开；短词被长词包含只算长词（「已购装备」不再拆成「已购」+「已购买」凑数）。10 用例全过。
+- 用户持续看到误弹的直接原因：服务进程 20:09 起一直跑旧代码，修复未生效。20:51 用 watcher.stop 停旧守护+服务后重拉，新进程确认带 `accepted` 字段；死亡回放/聊天噪声帧在新规则下零命中。发行 zip 同步重建（含另一会话加的聊天广播自动记录功能，该功能只写 selected、不影响弹出判定）。
+
+**2026-11-11 第八轮（手动选流派）**
+- 用户反馈：应该能选择走什么流派，推荐出装才准。此前流派由 `_profile_score` 自动选最高分，用户想走 AP 时可能仍推暴击。
+- `engine.build(..., archetype=None)`：候选按 key 过滤（含海克斯专属样本的 archetypes）；样本里没有该流派时退回自动并在 notes 说明。手动流派时「第 N 件」候选池额外限制为该流派 profiles 真实出过的装备（itemSet + purchaseOrder + laterItems + boots 的并集），过滤后为空则退回全池——避免 AP 路线推无尽。`_route_support` 自然只在过滤后的候选里取路线。
+- build 返回新增 `archetypes`（该英雄可选流派 [{key,name}]，按最优分排序去重）、`archetypeForced`；app 新增 `archetype_override` 状态 + `setArchetype` 动作 + state 顶层 `archetypeOverride`，并进 build 缓存 key。换英雄不重置（不可用时引擎自动退回，页面标签可见可改）。
+- 页面：出装区顶部新增流派标签行（自动 + 各流派，`.chip.sel` 高亮当前），点击 `ctrl('setArchetype', key)`；DEMO_STATE 补 archetypes。
+- 验证：卢锡安自动=暴击（33 万样本）/ 手动穿甲 → 路线改巨蛇之牙起手、第 3 件候选全穿甲件（公理圆弧/赛瑞尔达/无穷饥渴）；指定不存在的 AP → 退回自动+提示；珠光手镯专属样本下强制穿甲同样生效。400px 浮窗宽度标签行无溢出，自动/选中两态正确，点击接线正常，console 仅预期 /api 404。发行 zip 同步重建。
+
 
 ---
 
@@ -325,7 +364,9 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | 浮窗在游戏后面 | 看 Z 序；确认 `topmost_loop` 在跑；仍不行改游戏「窗口化」 |
 | 浮窗一闪就没 | 确认 `autoCloseOverlay=false`；看 `data/watcher.log` |
 | 海克斯没识别 | 看控制台「OCR 识别原文」；微调 `region`；或手动添加 |
-| 出装没随海克斯变 | 确认点了「选它」把海克斯加入已选列表 |
+| 没三选一却展开显示海克斯 | 第七轮已收紧：同帧 2~3 个近精确命中才展开；仍出现就看控制台 OCR 原文里是什么文字撞了名字 |
+| 出装没随海克斯变 | 确认海克斯在已选列表里（聊天广播自动记录，或点「选这个」手动添加） |
+| 已选海克斯没自动记录 | 看「自动记录已选海克斯」开关、聊天是否可见且广播还在；控制台 OCR 原文里看 `[聊天]` 段；微调 `chatRegion` 后点「聊天识别测试」；手动添加兜底 |
 | 「第 N 次」不对 | 控制台「海克斯阶段」改成手动 1~4；漏选/多选海克斯会带偏自动推断 |
 | 敌方阵容不显示 | 只有对局内（Live Client Data）才有；选人阶段为空是正常的 |
 | 「下一件」不准 | 读 Live 接口有 2~3 秒延迟；散件/回城前购买会短暂对不上，重新轮询即恢复 |

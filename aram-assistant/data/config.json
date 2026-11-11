@@ -14,8 +14,26 @@
   "autoOpenBrowser": true,
   "autoOverlay": true,
   "autoCloseOverlay": false,
+  "smartShow": true,
+  "shopRegion": [
+    0.0,
+    0.02,
+    0.72,
+    0.18
+  ],
+  "shopInterval": 2.0,
+  "shopGrace": 4.5,
+  "offerGrace": 10.0,
+  "autoRecord": true,
+  "chatRegion": [
+    0.0,
+    0.55,
+    0.32,
+    0.22
+  ],
+  "chatInterval": 3.0,
   "overlayPosition": "right",
   "overlayWidth": 400,
   "overlayHeight": 820,
-  "overlayCollapsed": true
+  "overlayCollapsed": false
 }

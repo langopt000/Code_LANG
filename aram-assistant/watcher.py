@@ -133,8 +133,8 @@ def main():
                 except Exception:
                     pass
                 log("收到停止标志，守护退出")
+                api_post("/api/control", {"action": "quit"})
                 if proc and proc.poll() is None:
-                    api_post("/api/control", {"action": "closeOverlay"})
                     proc.terminate()
                 return
 
@@ -149,7 +149,7 @@ def main():
 
             if online:
                 client_gone_at = 0
-                if not server_running():
+                if not server_running() and not STOP_FLAG.exists():
                     if proc is None or proc.poll() is not None:
                         log("正在自动启动 ARAM 助手 ...")
                         proc = start_server()

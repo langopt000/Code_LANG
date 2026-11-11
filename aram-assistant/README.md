@@ -20,6 +20,12 @@ start.bat
 
 打开 <http://127.0.0.1:8765/> 是控制台页面；`?overlay=1` 是浮窗形态。
 
+## 发给别人用（免安装版）
+
+`dist/ARAM助手-免安装版.zip`：解压到任意位置，双击「启动助手.bat」即可，不用装 Python 或任何依赖（包内自带嵌入式 Python 3.11，仅 Windows 10/11 64 位）。退出双击「退出助手.bat」，报错排查用「诊断启动.bat」，详见包内「使用说明.txt」。
+
+重新打包：下载 [python-3.11.9-embed-amd64.zip](https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip) 解压到 `dist/ARAM助手/runtime/`，在 `python311._pth` 末尾加一行 `..`，拷入源码与 `ui/`、`ocr.ps1`，补上三个 bat、`stop.py`、使用说明，压成 zip（保留顶层文件夹）。`dist/` 不进仓库。
+
 ## 文件
 
 | 文件 | 作用 |
@@ -31,6 +37,7 @@ start.bat
 | `vision.py` / `ocr.ps1` | 屏幕截取 + Windows OCR 识别海克斯卡牌 |
 | `window.py` | 置顶浮窗创建与定位（Edge/Chrome app 模式） |
 | `watcher.py` | 守护进程：检测客户端启动，自动拉起服务 |
+| `stop.py` | 退出入口：写停止标志 + 调 `quit` 关掉浮窗与服务（发行版用） |
 | `ui/index.html` | 单页界面（控制台 + 浮窗共用） |
 
 零第三方依赖，只用 Python 3 标准库；界面是单文件 HTML/CSS/JS。

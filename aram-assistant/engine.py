@@ -440,8 +440,9 @@ class Engine:
         out.sort(key=lambda x: (-x["winRate"], -(x["sampleCount"] or 0)))
         return out[:limit]
 
-    def build(self, champion_id, augment_ids=None, enemy_players=None, my_items=None):
-        """返回带购买顺序的出装方案（含敌方阵容加分与实时装备核对）。"""
+    def build(self, champion_id, augment_ids=None, enemy_players=None, my_items=None, archetype=None):
+        """返回带购买顺序的出装方案（含敌方阵容加分与实时装备核对）。
+        archetype 为手动指定的流派 key；样本里没有该流派时退回自动。"""
         augment_ids = [str(a) for a in (augment_ids or []) if a]
         if not champion_id:
             return {"steps": [], "order": [], "notes": ["先确定英雄"], "source": "无"}
@@ -472,11 +473,39 @@ class Engine:
                 "steps": [], "order": [], "archetype": "", "source": source,
                 "notes": ["该英雄暂无足够的出装样本"], "sampleCount": 0, "winRate": 0,
                 "slotRanking": {}, "profile": profile,
+                "archetypes": [], "archetypeForced": False,
             }
 
         candidates.sort(key=lambda t: -t[0])
+        archetypes, seen_keys = [], set()
+        for _, a, _, _ in candidates:
+            k = a.get("key", "")
+            if k and k not in seen_keys:
+                seen_keys.add(k)
+                archetypes.append({"key": k, "name": self.data.archetype_name(k)})
+        forced = False
+        if archetype:
+            sub = [c for c in candidates if c[1].get("key") == archetype]
+            if sub:
+                candidates = sub
+                forced = True
         _, arch, prof, from_aug = candidates[0]
         route = (prof.get("routes") or [{}])[0]
+
+        # 手动流派时，「第 N 件」候选只取该流派真实出过的装备，避免 AP 路线推无尽
+        arch_items = set()
+        if forced:
+            for _, _, p, _ in candidates:
+                for it in p.get("itemSet") or []:
+                    arch_items.add(str(it.get("id")))
+                for r in p.get("routes") or []:
+                    for it in r.get("purchaseOrder") or []:
+                        arch_items.add(str(it.get("id")))
+                    for row in r.get("laterItems") or []:
+                        arch_items.add(str((row.get("item") or {}).get("id")))
+                    for b in r.get("boots") or []:
+                        arch_items.add(str((b.get("item") or {}).get("id")))
+            arch_items.discard("0")
 
         def item_value(item, wr, sample, pick=0.0):
             bonus, _ = self._enemy_bonus(item, profile)
@@ -655,20 +684,27 @@ class Engine:
         else:
             slot_no = len(owned_final) + 1
             support = self._route_support(candidates, owned_final_ids)
-            rows = []
-            for item in slot_pool.get(str(slot_no), []):
-                iid = item.get("id")
-                if iid in bought_ids or iid == "0":
-                    continue
-                if (item.get("sampleCount") or 0) < 800:
-                    continue
-                if not item.get("final") or item.get("acq") != "shop":
-                    continue
-                if owns_boots and "Boots" in (item.get("cats") or []):
-                    continue
-                row = dict(item)
-                row["route"] = iid in support
-                rows.append(row)
+
+            def slot_rows(use_arch):
+                rows = []
+                for item in slot_pool.get(str(slot_no), []):
+                    iid = item.get("id")
+                    if iid in bought_ids or iid == "0":
+                        continue
+                    if (item.get("sampleCount") or 0) < 800:
+                        continue
+                    if not item.get("final") or item.get("acq") != "shop":
+                        continue
+                    if owns_boots and "Boots" in (item.get("cats") or []):
+                        continue
+                    if use_arch and arch_items and iid not in arch_items:
+                        continue
+                    row = dict(item)
+                    row["route"] = iid in support
+                    rows.append(row)
+                return rows
+
+            rows = slot_rows(True) or slot_rows(False)
             rows.sort(key=lambda x: -(x.get("winRate") or 0))
             picks["slot"] = slot_no
             picks["label"] = "第 %d 件" % slot_no
@@ -679,6 +715,10 @@ class Engine:
             "评分 = 组合胜率 + 构筑方向胜率 + 样本量对数加权；只做排序，不改变原始胜率。",
             "出门装 / 鞋子 / 三件套来自同一条真实购买路线，后续成装为胜率最高的可选件。",
         ]
+        if forced:
+            notes.append("流派已手动指定为「%s」：路线与候选件都按该流派的真实样本。" % self.data.archetype_name(arch.get("key", "")))
+        elif archetype:
+            notes.append("当前样本没有「%s」流派，已按自动选择。" % self.data.archetype_name(archetype))
         if matched:
             notes.append("已切换为「%s」专属样本；换掉海克斯后出装会重新计算。" % " / ".join(used_names[:3]))
         else:
@@ -690,6 +730,8 @@ class Engine:
         return {
             "archetype": self.data.archetype_name(arch.get("key", "")),
             "archetypeKey": arch.get("key", ""),
+            "archetypes": archetypes,
+            "archetypeForced": forced,
             "source": source,
             "fromAugment": self.aug_by_id.get(str(from_aug), {}).get("name") if from_aug else "",
             "sampleCount": prof.get("sampleCount", 0),
