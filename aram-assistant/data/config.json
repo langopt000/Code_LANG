@@ -1,7 +1,7 @@
 {
   "dataset": "high",
   "ocrEnabled": true,
-  "ocrInterval": 3.5,
+  "ocrInterval": 2.5,
   "region": [
     0.18,
     0.14,

@@ -184,7 +184,7 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `dataset` | `high` | `high` 高分段 / `all` 全分段，对应站点 URL 参数 |
-| `ocrEnabled` / `ocrInterval` | `true` / `3.5` | OCR 开关与轮询秒数 |
+| `ocrEnabled` / `ocrInterval` | `true` / `2.5` | OCR 开关与轮询秒数 |
 | `region` | `[0.18,0.14,0.58,0.60]` | 屏幕比例 `(x,y,w,h)`，框住中央卡牌 |
 | `opacity` | `0.92` | 浮窗整体透明度 |
 | `clickThrough` | `false` | 鼠标穿透（开启后浮窗本身不可点，需在控制台关） |
@@ -218,8 +218,8 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | GET | `/api/diagnose` | 6 项自检（守护/服务/客户端进程/LCU/LiveData/浮窗） |
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/control` | `{"action":..., "value":..., "fromUser":...}` |
-| POST | `/api/ocr` | 立即识别一次 |
-| POST | `/api/refresh` | 重新同步数据 |
+| POST | `/api/ocr` | 立即识别一次（多帧投票口径，画面里没有卡名命中时同步清掉陈旧卡面） |
+| POST | `/api/refresh` | 重新同步数据并立即识别一次屏幕 |
 
 `control` 动作：`setChampion`、`clearManual`、`addAugment`、`removeAugment`、`clearAugments`、`setStage`（0=自动，1~4=手动）、`setDataset`、`setOcr`、`setRegion`、`setTheme`、`setOpacity`、`setClickThrough`、`setAutoOverlay`、`setSmartShow`、`setShopRegion`、`testShop`、`setAutoRecord`、`setChatRegion`、`testChat`、`setArchetype`（value=流派 key，空串=自动）、`setOverlayPosition`、`setCollapsed`、`launchOverlay`、`testOverlay`、`closeOverlay`、`redetect`、`refresh`、`quit`（关浮窗并干净退出服务，供发行版「退出助手.bat」用）。
 
@@ -360,6 +360,25 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 顺带修复演示模式标志：旧逻辑第二次轮询失败就把 `demo` 置 false，导致演示态选取走服务端路径 6s 后回滚报错。新增 `everLive`，从未连上服务则一直是演示。
 - 验证（无头浏览器，控制台+浮窗两模式）：选取→盖章/绿框/chip 飞入/toast；移除→chip 消失+撤销 toast；撤销→恢复；连续 4 轮快速选/删 toast 上限 2、无残留 pending；动画窗口后类名干净移除；出装来源变化触发 flash；折叠态 toast 隐藏（display:none）；console 仅预期 /api 404、无 JS 错误。本会话浏览器视口不可见，布局未截图复核，但新增 CSS 均为 transform/opacity/box-shadow/background 与 fixed 定位，不改变元素尺寸，无新增溢出。
 
+**2026-11-11 第十轮（OCR 多帧投票 + 刷新联动识别）**
+- 用户反馈：①海克斯三选一卡面有时不弹出；②点「刷新」后识别结果不更新。两个独立根因：
+  不弹出 = 第七轮单帧口径要求一帧里 2~3 个 >=0.9 强命中，OCR 单帧经常只读清 1~2 张（错一字就掉到 0.8x），整帧作废；
+  刷新不更新 = UI「刷新」只调 `/api/refresh` 重同步数据从不跑 OCR，且被拒帧永远不替换 `candidates`（旧卡最长残留 25s）。
+- `app.py` 新增 `OfferTracker` 多帧投票（`offer_from` 单帧口径保留为一轮首帧快路径）：
+  强命中（>=0.9）任一帧出现即算，次强命中（0.8~0.9）需 >=2 帧复现，入选 id 还须在最近 2 帧内出现过（防旧轮残留回魂）；
+  合并 2~3 个才采纳；一帧 4+ 强命中或合并 >3 个按计分板/列表拒绝（进行中的一轮不被 Tab 瞥一眼污染）；
+  换轮切断：新帧命中与历史完全不相交 → 历史作废并立即清陈旧卡面（换卡/重随自动换轮，重随 1~2 帧内完成新旧替换）；
+  连续 2 个干净空帧只清投票不动展示（offerGrace 宽限不变）；超窗（9s）旧票自动出局。
+- 自动识别与手动识别改走共用 `_apply_offer_frame`：换轮即清陈旧候选（不再等 25s）；同一组 id 重复采纳不换对象不重排，防浮窗卡片抖动；
+  手动识别（含刷新链路）画面里连一个 >=0.8 命中都没有时以画面为准清空陈旧卡面；`/api/ocr` 遇自动识别在跑时最多等 3s 接手，不再直接「正在识别中」。
+- `/api/refresh`（控制台「刷新」按钮）链式触发一次屏幕识别——「刷新即重认」，两个刷新按钮 tooltip 同步改为「重新同步数据并识别屏幕」。
+- 聊天广播自动记录到选取时清投票（本轮三选一已结束，防残留命中再弹）；换英雄/关浮窗同样清投票。
+- 识别节拍 `ocrInterval` 3.5s → 2.5s（DEFAULT_CONFIG 与 data/config.json 同步）。
+- 验证：35 用例全过——第七轮单帧口径 6 例无回退（3 干净卡/只读 2 张强命中采纳；1 精确+1 模糊 0.771/计分板 5 名/两模糊拒绝）；
+  多帧新场景 21 例（1 强+次强跨帧弹出并逐帧补全第 3 张、0.771 永不投票、换轮切断清陈旧、重随甲乙丙→甲乙丁 2 帧完成替换、
+  2 空帧清票防回魂、计分板帧不污染进行中一轮、超窗旧票不并入）；`_apply_offer_frame` 集成 8 例（换轮立即清、手动空画面清、超 25s 兜底清）。
+  `py_compile` 全量通过。取舍：次强命中 2 帧复现的阈值（0.8）若真机出现持续性短行贴纸误弹，调 `OfferTracker.WEAK`/`PROMOTE_FRAMES` 即可。
+
 
 ---
 
@@ -371,8 +390,9 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 | 自检里 LCU 红点 | 看 `source`/错误文字；确认客户端已登录进大厅；必要时点「重连客户端」 |
 | 浮窗在游戏后面 | 看 Z 序；确认 `topmost_loop` 在跑；仍不行改游戏「窗口化」 |
 | 浮窗一闪就没 | 确认 `autoCloseOverlay=false`；看 `data/watcher.log` |
-| 海克斯没识别 | 看控制台「OCR 识别原文」；微调 `region`；或手动添加 |
-| 没三选一却展开显示海克斯 | 第七轮已收紧：同帧 2~3 个近精确命中才展开；仍出现就看控制台 OCR 原文里是什么文字撞了名字 |
+| 海克斯没识别 | 看控制台「OCR 识别原文」；点「刷新」/「重新识别」会立即重认一遍；微调 `region`；或手动添加 |
+| 识别结果不更新/还是旧卡 | 第十轮已联动：「刷新」会重同步数据并重新识别；换卡/重随后旧卡面最多 1~2 个识别周期（约 2.5~5s）内被换掉；仍残留就看 `ocrText` 是否一直读不到新卡名 |
+| 没三选一却展开显示海克斯 | 第七轮单帧口径 + 第十轮多帧投票已收紧；仍出现就看控制台 OCR 原文里是什么文字撞了名字，必要时调高 `OfferTracker.WEAK` |
 | 出装没随海克斯变 | 确认海克斯在已选列表里（聊天广播自动记录，或点「选这个」手动添加） |
 | 已选海克斯没自动记录 | 看「自动记录已选海克斯」开关、聊天是否可见且广播还在；控制台 OCR 原文里看 `[聊天]` 段；微调 `chatRegion` 后点「聊天识别测试」；手动添加兜底 |
 | 「第 N 次」不对 | 控制台「海克斯阶段」改成手动 1~4；漏选/多选海克斯会带偏自动推断 |
@@ -390,9 +410,9 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - ✅ 出装区改为按实际已出成品数推进的「下一件 + 胜率前三」→ `build.picks`，排除已买/重复鞋子，真实路线仅作「同路线」提示（原 `slotAdvice` 的路线→替换写法过于绕，已移除）
 - ✅ 敌方阵容（AD/AP/坦度）参与出装评分 → `enemy_profile()` + `_enemy_bonus()`，并给克制备选
 - ✅ 多海克斯组合加成接入评级 → `augmentCombinations` 成对样本，协同分单独可解释
+- ✅ **OCR 多帧投票**：`OfferTracker` 跨帧合并（强命中并集 + 次强 2 帧复现 + 换轮切断），减少漏弹与抖动（第十轮）
 
 还可以继续：
-- **OCR 多帧投票**：同一轮卡牌连续识别 2~3 次取交集，减少抖动与误识别（目前靠 25s 保持窗口）
 - **敌方出装时序**：现在只看「已买什么」，可再加「谁最肥（等级/装备数）」，给集火与出装优先级
 - **多海克斯（3 个以上）组合**：数据没有三件样本，只能做启发式（同构筑方向加权），需要明确标注「经验」
 - **战绩/熟练度**：LCU 可读近期对局，可给「你玩这个英雄的胜率」与版本胜率做对照（涉及隐私，需用户明确同意）

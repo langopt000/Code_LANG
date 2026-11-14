@@ -53,10 +53,122 @@ def offer_from(cands):
     strong = [c for c in cands if (c.get("ocrScore") or 0) >= 0.9]
     return strong[:3] if 2 <= len(strong) <= 3 else []
 
+
+class OfferTracker:
+    """海克斯三选一多帧投票（第十轮）。
+
+    OCR 单帧经常只读清 1~2 张卡（错一字得分就掉到 0.9 以下），第七轮的单帧口径
+    会漏弹；这里把最近几帧的命中跨帧合并提高召回，同时保住防误弹口径：
+
+    - 单帧快路径：一轮的首帧 2~3 个强命中（>=0.9）→ 立即采纳（同 offer_from）
+    - 跨帧合并：强命中（>=0.9）任一帧出现即算；次强命中（0.8~0.9）需 >=2 帧
+      复现才算；入选 id 还须在最近 2 帧内出现过（防旧轮残留回魂）
+    - 合并出 2~3 个才采纳；一帧 4+ 强命中或合并 >3 个 → 按计分板/列表拒绝
+    - 换轮切断：新帧命中与历史帧命中完全不相交 → 历史作废（换卡/重随/新一轮），
+      返回 cleared 让调用方立即丢弃陈旧卡面
+    - 连续 2 个干净空帧 → 只清投票（卡面展示宽限仍由调用方按 25s/offerGrace 控制）
+    """
+
+    STRONG = 0.9
+    WEAK = 0.8
+    PROMOTE_FRAMES = 2   # 次强命中需复现的帧数
+    RECENT_FRAMES = 2    # 入选 id 须在最近 N 帧内出现过
+    WINDOW = 9.0         # 帧窗口（秒），约 3 个识别周期
+    MAX_FRAMES = 4
+    EMPTY_RESET = 2      # 连续空帧多少次清空投票
+
+    def __init__(self):
+        self.frames = []  # [(ts, {id: (score, cand)})] 时间升序
+        self._empty_streak = 0
+
+    def reset(self):
+        self.frames = []
+        self._empty_streak = 0
+
+    def feed(self, cands, ts=None):
+        """喂一帧识别结果，返回 (offer, cleared)。
+
+        offer：本轮可采纳的 2~3 张（带最优 ocrScore），空 = 尚不足或被拒；
+        cleared：换轮已发生 → 调用方应立即丢弃陈旧候选（空帧清票不触发）。
+        """
+        ts = time.time() if ts is None else float(ts)
+        # 过期帧先丢（识别暂停/切后台后回来，旧票不许再参与投票）
+        self.frames = [(t, h) for (t, h) in self.frames if ts - t <= self.WINDOW]
+
+        hits = {}
+        for c in cands or []:
+            s = float(c.get("ocrScore") or 0)
+            if s >= self.WEAK and c.get("id"):
+                hits[c["id"]] = (s, c)
+        strong_ids = {i for i, (s, _) in hits.items() if s >= self.STRONG}
+
+        # 一帧 4+ 个近精确名：计分板/列表，整帧作废也不动历史（Tab 瞥一眼不丢卡面）
+        if len(strong_ids) > 3:
+            return [], False
+
+        if not hits:
+            self._empty_streak += 1
+            if self._empty_streak >= self.EMPTY_RESET:
+                self.frames = []
+            return [], False
+
+        self._empty_streak = 0
+        cleared = False
+        # 换轮切断：新帧命中与历史命中完全不相交 → 换卡/重随/新一轮
+        if self.frames:
+            hist = set()
+            for _, fh in self.frames:
+                hist |= set(fh)
+            if not (set(hits) & hist):
+                self.frames = []
+                cleared = True
+
+        # 一轮首帧快路径：2~3 强命中立即采纳（第七轮口径）
+        if not self.frames:
+            offer = offer_from(cands)
+            if offer:
+                self.frames.append((ts, hits))
+                return offer, cleared
+
+        self.frames.append((ts, hits))
+        if len(self.frames) > self.MAX_FRAMES:
+            self.frames = self.frames[-self.MAX_FRAMES:]
+
+        merged = {}  # id -> [最优分, cand, 帧数, 曾强命中]
+        for _, fh in self.frames:
+            for i, (s, c) in fh.items():
+                rec = merged.get(i)
+                if rec is None:
+                    merged[i] = [s, c, 1, s >= self.STRONG]
+                else:
+                    if s > rec[0]:
+                        rec[0], rec[1] = s, c
+                    if s >= self.STRONG:
+                        rec[3] = True
+                    rec[2] += 1
+        recent = set()
+        for _, fh in self.frames[-self.RECENT_FRAMES:]:
+            recent |= set(fh)
+        voted = []
+        for i, (bs, c, n, ever_strong) in merged.items():
+            if i in recent and (ever_strong or n >= self.PROMOTE_FRAMES):
+                item = dict(c)
+                item["ocrScore"] = round(bs, 3)
+                voted.append(item)
+        if len(voted) > 3:
+            # 新旧混杂（重随/换卡）只保留最新帧里仍有的；仍不像卡面就整轮拒绝
+            newest = set(self.frames[-1][1])
+            kept = [v for v in voted if v["id"] in newest]
+            voted = kept if 2 <= len(kept) <= 3 else []
+        if 2 <= len(voted) <= 3:
+            voted.sort(key=lambda a: -(a.get("ocrScore") or 0))
+            return voted, cleared
+        return [], cleared
+
 DEFAULT_CONFIG = {
     "dataset": "high",
     "ocrEnabled": True,
-    "ocrInterval": 3.5,
+    "ocrInterval": 2.5,
     "region": [0.18, 0.14, 0.58, 0.60],  # 只框屏幕中央卡牌，避开右侧浮窗
     "opacity": 0.92,
     "clickThrough": False,
@@ -138,6 +250,7 @@ class Assistant:
         self.last_chat_ocr = 0
         self._smart_token = None     # 当前决策标识（海克斯卡面 / 第几次商店），变了才动窗口
         self._smart_collapse = None  # 智能模式下的临时折叠态；None 表示跟随用户配置
+        self._offer_tracker = OfferTracker()  # 海克斯三选一多帧投票
         self.build_cache = {}
         self.build_cache_key = None
         self.build = {}
@@ -220,6 +333,7 @@ class Assistant:
                     self.shop_hit = ""
                     self._shop_miss = 0
                     self.candidates = []
+                    self._offer_tracker.reset()
                 self._smart_token = None
                 self._smart_collapse = None
                 threading.Thread(target=self.overlay.close, daemon=True).start()
@@ -305,6 +419,7 @@ class Assistant:
                 self._chat_done = set()
                 self.candidates = []
                 self.build_cache_key = None
+                self._offer_tracker.reset()
             self.log("识别到英雄：%s" % self.champion_name())
 
         self.refresh_state()
@@ -360,6 +475,33 @@ class Assistant:
                     self.ocr_error = str(exc)[:140]
                 self.ocr_busy = False
 
+    def _apply_offer_frame(self, cands, err, label, manual=False):
+        """多帧投票采纳/清空候选，自动识别与手动识别共用。返回采纳的 offer。"""
+        offer, cleared = [], False
+        with self.lock:
+            if not err:
+                offer, cleared = self._offer_tracker.feed(cands)
+            if offer:
+                # 同一组 id 重复采纳时不重排/不换对象，避免浮窗卡片抖动
+                if {c.get("id") for c in self.candidates} != {c.get("id") for c in offer}:
+                    self.candidates = offer
+                self.last_card_seen = time.time()
+            elif cleared:
+                # 换轮/重随：陈旧卡面立即作废，不等 25s
+                self.candidates = []
+            elif manual and not err and not any(
+                (c.get("ocrScore") or 0) >= 0.8 for c in (cands or [])
+            ):
+                # 手动识别且画面里连一个像卡名的命中都没有：以当前画面为准，清掉陈旧卡面
+                self.candidates = []
+                self._offer_tracker.reset()
+            elif self.candidates and time.time() - self.last_card_seen > 25:
+                self.candidates = []
+                self._offer_tracker.reset()
+        if offer:
+            self.log("%s：%s" % (label, " / ".join(x["name"] for x in offer)))
+        return offer
+
     def _run_augment_ocr(self):
         if not is_game_foreground():
             return
@@ -368,17 +510,10 @@ class Assistant:
             self.cfg.get("region", DEFAULT_CONFIG["region"]),
             self.engine.augments,
         )
-        offer = offer_from(cands)
         with self.lock:
             self.ocr_text = text[:500] if text else ""
             self.ocr_error = err
-            if offer:
-                self.candidates = offer
-                self.last_card_seen = time.time()
-            elif time.time() - self.last_card_seen > 25:
-                self.candidates = []
-        if offer:
-            self.log("识别到海克斯：%s" % " / ".join(x["name"] for x in offer))
+        self._apply_offer_frame(cands, err, "识别到海克斯")
 
     def _run_shop_ocr(self):
         if not is_game_foreground():
@@ -439,6 +574,8 @@ class Assistant:
                     added.append(p["name"])
             if added:
                 self.build_cache_key = None
+                # 选取落定即本轮三选一结束：清投票，防残留命中再弹（卡面展示宽限保留）
+                self._offer_tracker.reset()
         for name in added:
             self.log("自动记录已选海克斯：%s（聊天广播）" % name)
         return picks, text, err
@@ -496,22 +633,21 @@ class Assistant:
     def force_ocr(self):
         if not self.ready:
             return {"ok": False, "error": "数据尚未就绪"}
+        deadline = time.time() + 3.0
+        while self.ocr_busy and time.time() < deadline:
+            time.sleep(0.1)  # 自动识别恰好在跑：稍等接手，避免「正在识别中」白点
         if self.ocr_busy:
-            return {"ok": False, "error": "正在识别中"}
+            return {"ok": False, "error": "正在识别中，请稍候再试"}
         self.ocr_busy = True
         try:
+            self.last_ocr = time.time()
             cands, text, err = ocr_detect(
                 self.cfg.get("region", DEFAULT_CONFIG["region"]), self.engine.augments, keep_png=True
             )
-            offer = offer_from(cands)
             with self.lock:
                 self.ocr_text = text[:500] if text else ""
                 self.ocr_error = err
-                if offer:
-                    self.candidates = offer
-                    self.last_card_seen = time.time()
-            if offer:
-                self.log("手动识别：%s" % " / ".join(x["name"] for x in offer))
+            offer = self._apply_offer_frame(cands, err, "手动识别", manual=True)
             return {"ok": True, "candidates": cands, "accepted": offer, "text": text, "error": err}
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:160]}
@@ -901,7 +1037,16 @@ class Assistant:
         elif action == "refresh":
             self.ready = False
             self.build_cache_key = None
-            threading.Thread(target=self.init_data, daemon=True).start()
+
+            def _resync():
+                self.init_data()
+                try:
+                    # 刷新即重认一遍屏幕，避免「刷新了识别不更新」
+                    self.force_ocr()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_resync, daemon=True).start()
             self.log("正在重新同步数据...")
         else:
             return {"ok": False, "error": "未知操作 %s" % action}
