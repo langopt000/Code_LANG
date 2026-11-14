@@ -360,7 +360,7 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - 顺带修复演示模式标志：旧逻辑第二次轮询失败就把 `demo` 置 false，导致演示态选取走服务端路径 6s 后回滚报错。新增 `everLive`，从未连上服务则一直是演示。
 - 验证（无头浏览器，控制台+浮窗两模式）：选取→盖章/绿框/chip 飞入/toast；移除→chip 消失+撤销 toast；撤销→恢复；连续 4 轮快速选/删 toast 上限 2、无残留 pending；动画窗口后类名干净移除；出装来源变化触发 flash；折叠态 toast 隐藏（display:none）；console 仅预期 /api 404、无 JS 错误。本会话浏览器视口不可见，布局未截图复核，但新增 CSS 均为 transform/opacity/box-shadow/background 与 fixed 定位，不改变元素尺寸，无新增溢出。
 
-**2026-11-11 第十轮（OCR 多帧投票 + 刷新联动识别）**
+**2026-11-14 第十轮（OCR 多帧投票 + 刷新联动识别）**
 - 用户反馈：①海克斯三选一卡面有时不弹出；②点「刷新」后识别结果不更新。两个独立根因：
   不弹出 = 第七轮单帧口径要求一帧里 2~3 个 >=0.9 强命中，OCR 单帧经常只读清 1~2 张（错一字就掉到 0.8x），整帧作废；
   刷新不更新 = UI「刷新」只调 `/api/refresh` 重同步数据从不跑 OCR，且被拒帧永远不替换 `candidates`（旧卡最长残留 25s）。
