@@ -35,5 +35,5 @@
   "overlayPosition": "right",
   "overlayWidth": 400,
   "overlayHeight": 820,
-  "overlayCollapsed": false
+  "overlayCollapsed": true
 }

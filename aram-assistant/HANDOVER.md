@@ -1,7 +1,7 @@
 # ARAM 海克斯大乱斗实时助手 · 交接文档
 
 > 项目目录：`E:\78zaoCoding\Code_LANG\aram-assistant`（2026-11-10 从 WorkBuddy 临时会话目录迁移至此）
-> GitHub：`https://github.com/langopt000/Code_LANG`（子目录 `aram-assistant`）
+> GitHub：`https://github.com/langopt000/aram-assistant`（子目录 `aram-assistant`）
 > 文档日期：2026-11-10 · 数据版本：ARAMKit v16.22（2026-11-09，高分段 4,297,659 场）
 > 技术栈：Python 3 标准库 + 单页 HTML/CSS/JS，零第三方依赖、零 npm 包、零 Electron
 
@@ -351,6 +351,14 @@ WMI 读 `LeagueClientUx.exe` 的 `CommandLine` / `ExecutablePath` 常返回空�
 - build 返回新增 `archetypes`（该英雄可选流派 [{key,name}]，按最优分排序去重）、`archetypeForced`；app 新增 `archetype_override` 状态 + `setArchetype` 动作 + state 顶层 `archetypeOverride`，并进 build 缓存 key。换英雄不重置（不可用时引擎自动退回，页面标签可见可改）。
 - 页面：出装区顶部新增流派标签行（自动 + 各流派，`.chip.sel` 高亮当前），点击 `ctrl('setArchetype', key)`；DEMO_STATE 补 archetypes。
 - 验证：卢锡安自动=暴击（33 万样本）/ 手动穿甲 → 路线改巨蛇之牙起手、第 3 件候选全穿甲件（公理圆弧/赛瑞尔达/无穷饥渴）；指定不存在的 AP → 退回自动+提示；珠光手镯专属样本下强制穿甲同样生效。400px 浮窗宽度标签行无溢出，自动/选中两态正确，点击接线正常，console 仅预期 /api 404。发行 zip 同步重建。
+
+**2026-11-11 第九轮（选取即时交互反馈）**
+- 用户反馈：手动选中海克斯时「非常没有交互感」——点了没动静，不知道选上没有。
+- 乐观更新：`pickAug` / `dropAug` 点击即改本地视图（`pendingSel` / `pendingRem`），不等 1.2s 轮询；`poll` 回来用服务端 `selectedAugments` 校准，6s 未确认才回滚并提示失败。换英雄/换局清空乐观状态。
+- 即时反馈：卡片按钮「选这个」→ 禁用态「已选 ✓」（stampIn 盖章动画）；卡片加 `.picked` 绿描边+渐变底、`.just-picked` 一次性辉光；已选 chip 飞入（chipIn）；底部 toast 确认（移除带「撤销」按钮，4.2s）；出装来源变化时整块 `.flash` 高亮；阶段标签 / 顶部徽章变化 `.pulse`。所有按钮加按压回弹（`:active scale(.94)`）。
+- 动画不被轮询截断：`setHTML` 只在 HTML 变化时重写，`freshMark` 给新元素保留动画类至少 800ms（卡片）/420ms（chip），入场动画 `.enter` 只在卡面指纹变化时播一次。`prefers-reduced-motion` 全量关闭动画。
+- 顺带修复演示模式标志：旧逻辑第二次轮询失败就把 `demo` 置 false，导致演示态选取走服务端路径 6s 后回滚报错。新增 `everLive`，从未连上服务则一直是演示。
+- 验证（无头浏览器，控制台+浮窗两模式）：选取→盖章/绿框/chip 飞入/toast；移除→chip 消失+撤销 toast；撤销→恢复；连续 4 轮快速选/删 toast 上限 2、无残留 pending；动画窗口后类名干净移除；出装来源变化触发 flash；折叠态 toast 隐藏（display:none）；console 仅预期 /api 404、无 JS 错误。本会话浏览器视口不可见，布局未截图复核，但新增 CSS 均为 transform/opacity/box-shadow/background 与 fixed 定位，不改变元素尺寸，无新增溢出。
 
 
 ---
